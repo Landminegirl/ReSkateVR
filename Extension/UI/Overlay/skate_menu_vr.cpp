@@ -27,7 +27,7 @@ bool tiles(SkateMenu& menu, const char* label, const char* tooltip, const char* 
 }
 }
 
-void vr_controls(SkateMenu& menu, const Model& model) {
+void vr_controls(SkateMenu& menu, const Model& model, const CallbacksV3& callbacks) {
     using Limits = vr::Limits;
     const auto vr_status = vr::status();
     auto options = vr::settings();
@@ -49,6 +49,11 @@ void vr_controls(SkateMenu& menu, const Model& model) {
         info(menu, "Image", std::format("game {}x{}, headset wants {}x{} per eye", vr_status.image_width,
             vr_status.image_height, vr_status.recommended_width, vr_status.recommended_height));
     }
+    bool game_hud = !model.debug.game_ui_hidden;
+    ImGui::BeginDisabled(!model.debug.ui_available || !callbacks.queue_debug);
+    if (toggle_row(menu, "Show game HUD", "Show the game's scores, objectives and indicators while riding.", game_hud))
+        debug_request(menu, callbacks, {DebugAction::set_game_ui_hidden, !game_hud});
+    ImGui::EndDisabled();
     if (primary_button(menu, "Recenter view", vr_status.running)) vr::recenter();
     if (primary_button(menu, "Recommended settings", true)) {
         // Every VR value back to the tested defaults; VR stays on or off.

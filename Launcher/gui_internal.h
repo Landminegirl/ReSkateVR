@@ -279,6 +279,7 @@ public:
     // The password only lives in memory until DepotDownloader asks for it; it
     // may be empty when DepotDownloader remembers the login.
     void download(bool validate, bool qr, std::string password);
+    void select_launch(bool vr);
     void play();
     void cancel();
     // Answers the pending Steam prompt; nothing cancels the download.
@@ -305,6 +306,7 @@ private:
     bool has_answer_{};
     std::thread worker_;
     std::atomic<bool> busy_{};
+    std::atomic<bool> vr_launch_{};
     std::atomic<bool> cancel_{};
     std::atomic<bool> restart_{};
     std::atomic<bool> ignore_mod_problems_{};

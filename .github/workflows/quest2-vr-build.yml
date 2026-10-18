@@ -23,9 +23,9 @@ jobs:
       - name: Configure
         run: cmake --preset vs2022-x64 -DDINGOSDK_CARGO=OFF -DDINGOSDK_BUILD_VR_TESTS=ON -DDINGOSDK_LAUNCHER_AUTO_UPDATE=OFF
       - name: Build
-        run: cmake --build --preset release --parallel 4 --target dingosdk_runtime dingosdk_launcher dingosdk_vr_math_tests
+        run: cmake --build --preset release --parallel 4 --target dingosdk_runtime dingosdk_launcher dingosdk_vr_math_tests dingosdk_vr_launch_tests
       - name: Check native VR math
-        run: ctest --test-dir build/vs2022-x64 -C Release -R vr_math --output-on-failure
+        run: ctest --test-dir build/vs2022-x64 -C Release -R "vr_(math|launch)" --output-on-failure
       - name: Stage test binaries
         shell: pwsh
         run: |

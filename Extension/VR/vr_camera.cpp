@@ -231,6 +231,8 @@ struct Camera {
     math::EyesHeading eyes;
     math::EyesPosition eyes_place;
     math::HeadOrigin head_origin;
+    math::PlayerHeading player_heading;
+    std::optional<BodyPose> last_body;
     bool head_mode = false;
     float eyes_blend = 0;
     bool eyes_on = false;
@@ -328,6 +330,8 @@ bool apply_camera(std::array<float, 16>& matrix, CameraWriter writer, const Body
         auto& c = camera();
         std::lock_guard lock(c.mutex);
         const double now = seconds_now();
+        if (body) c.last_body = *body;
+        else if (options.head_centred && options.view_mode == 0 && c.last_body) body = &*c.last_body;
         // The render handoff ends each frame. Without it (its hook unavailable),
         // the tick is the only writer and ends the frame itself.
         if (writer == CameraWriter::render) c.render_seen = now;
@@ -352,6 +356,7 @@ bool apply_camera(std::array<float, 16>& matrix, CameraWriter writer, const Body
             c.eyes = {};
             c.eyes_place = {};
             c.head_origin = {};
+            c.player_heading = {};
             c.eyes_on = false;
             c.tilt_rig = {};
         }
@@ -367,6 +372,7 @@ bool apply_camera(std::array<float, 16>& matrix, CameraWriter writer, const Body
             c.eyes = {};
             c.eyes_place = {};
             c.head_origin = {};
+            c.player_heading = {};
             c.eyes_on = false;
             c.tilt_rig = {};
             c.trail.clear();
@@ -396,6 +402,7 @@ bool apply_camera(std::array<float, 16>& matrix, CameraWriter writer, const Body
         if (c.head_mode != head_centred) {
             c.head_mode = head_centred;
             c.head_origin = {};
+            c.player_heading = {};
             c.eyes_place = {};
         }
 
@@ -436,7 +443,7 @@ bool apply_camera(std::array<float, 16>& matrix, CameraWriter writer, const Body
         }
         if (body && head_centred) {
             // Locomotion turns the player rig; animated neck/head twists do not.
-            if (!look) c.heading = body->chest_heading;
+            if (!look) c.heading = math::player_heading(c.player_heading, body->trajectory_heading, body->chest_heading);
             c.eyes_on = false;
             c.heading_rig.value = c.heading;
         } else if (body && first) {
@@ -463,7 +470,7 @@ bool apply_camera(std::array<float, 16>& matrix, CameraWriter writer, const Body
         auto base = matrix;
         const bool body_near = body && std::abs(matrix[12] - body->origin[0]) < 3.0f &&
             std::abs(matrix[13] - body->origin[1]) < 3.0f && std::abs(matrix[14] - body->origin[2]) < 3.0f;
-        if (body_near && head_centred) {
+        if (body && head_centred && (body_near || c.head_origin.ready)) {
             const auto at = math::head_origin(c.head_origin, {matrix[12], matrix[13], matrix[14]},
                 body->origin, c.heading);
             for (std::size_t i = 0; i < 3; ++i) base[12 + i] = at[i];
@@ -473,250 +480,350 @@ bool apply_camera(std::array<float, 16>& matrix, CameraWriter writer, const Body
             // crouches scaled by Crouch.
             const auto eyes_at = math::eyes_position(c.eyes_place, {matrix[12], matrix[13], matrix[14]}, body->origin,
                 frame_end ? rig_elapsed : 0.0f, options.crouch_follow);
-            for (std::size_t i = 0; i < 3; ++i) base[12 + i] = eyes_at[i];
+            for (std::size_t i = 0; i < 3; ++i) base[12 …13533 tokens truncated…f = f;
         }
-        {
-            // The seat offset, level along the view's heading. On a wall it would push the camera
-            // out past the head, so it fades out as the board nears vertical (up axis 0.55 to 0.25,
-            // either side up), held through airs. Grinds tilt the board less, and an upside-down
-            // board (darkslides) is as flat as an upright one: the seat stays and the board stays in view.
-            if (body && frame_end) {
-                const bool airborne_now = body->physics_state >= 200 && body->physics_state < 300;
-                const float wanted = !body->on_board ? 1.0f : airborne_now ? c.seat_level
-                    : std::clamp((std::abs(body->board[5]) - 0.25f) / 0.3f, 0.0f, 1.0f);
-                c.seat_level += (wanted - c.seat_level) * (1 - std::exp(-std::clamp(rig_elapsed, 0.0f, 0.5f) / 0.15f));
-                // Stepping on or off the board moves the seat between the two offsets (~0.5 s).
-                const float board = body->on_board || (body->physics_state >= 100 && body->physics_state < 500) ? 1.0f : 0.0f;
-                c.seat_board += (board - c.seat_board) * (1 - std::exp(-std::clamp(rig_elapsed, 0.0f, 0.5f) / 0.15f));
-            }
-            const float level = body ? c.seat_level : 1.0f;
-            const auto mix = [&](float on_board, float on_foot) { return (on_foot + (on_board - on_foot) * c.seat_board) * level; };
-            const auto seat = first_person::rotate(math::yaw(c.heading),
-                {mix(options.seat_side, options.seat_side_foot), mix(options.seat_up, options.seat_up_foot),
-                    -mix(options.seat_forward, options.seat_forward_foot)});
-            for (std::size_t i = 0; i < 3; ++i) base[12 + i] += seat[i];
-        }
-        if (body && frame_end && !(body->physics_state >= 200 && body->physics_state < 300)) {
-            // The trail: where the skater has touched ground (not the arc of an air), for the
-            // cameras behind them.
-            if (c.trail.empty() || std::hypot(body->origin[0] - c.trail.back()[0], body->origin[2] - c.trail.back()[2]) > 0.3f ||
-                std::abs(body->origin[1] - c.trail.back()[1]) > 0.3f) {
-                c.trail.push_back(body->origin);
-                if (c.trail.size() > 300) c.trail.pop_front();
-            }
-        }
-        // Cameras behind the skater (third person, the outside views): `anchor` plus `offset`,
-        // placed below so they can pull in on slopes.
-        bool behind_camera = false;
-        std::array<float, 3> anchor{}, offset{};
-        if (options.view_mode == 1) {
-            // Third person: behind (+Z is backward) and above the skater, along the followed heading.
-            behind_camera = true;
-            anchor = {base[12], base[13], base[14]};
-            offset = first_person::rotate(math::yaw(c.heading), {0, options.third_height, options.third_distance});
-        }
-
-        const auto view = c.next_view;
-        auto eye = to_pose(views[view].pose);
-        const bool side_by_side = options.stereo_mode != 0; // Side-by-side input or depth stereo.
-        if (side_by_side) {
-            // The game renders from between the eyes; the stereo shader makes both.
-            const auto other = to_pose(views[view ^ 1u].pose);
-            for (std::size_t i = 0; i < 3; ++i) eye.position[i] = (eye.position[i] + other.position[i]) * 0.5f;
-            if (head_centred) eye.orientation = head.orientation;
-        }
-        const auto aspect = s.image_aspect.load(std::memory_order_acquire);
-        std::array<math::Tangents, 2> tangents{};
-        for (std::size_t i = 0; i < 2; ++i)
-            tangents[i] = math::tangents_from_angles(views[i].fov.angleLeft, views[i].fov.angleRight, views[i].fov.angleUp, views[i].fov.angleDown);
-        const float tangent = math::render_tangent(tangents, aspect, options.fov_scale);
-        const float fov = math::native_fov_degrees(tangent * options.fov_correction, aspect, options.fov_vertical);
-        if (!std::isfinite(fov) || fov < 10.0f || fov > 170.0f) {
-            if (now - c.last_skip_log > 1.0) {
-                c.last_skip_log = now;
-                logging::write(logging::Level::warning, logging::Channel::graphics,
-                    std::format("VR: camera skipped: render FOV {:.1f} (tangent {:.3f}, aspect {:.3f}, scale {:.2f}, vertical {}); "
-                        "eye 0 angles L{:.3f} R{:.3f} U{:.3f} D{:.3f}.", fov, tangent, aspect, options.fov_scale, options.fov_vertical,
-                        views[0].fov.angleLeft, views[0].fov.angleRight, views[0].fov.angleUp, views[0].fov.angleDown));
-            }
-            return false;
-        }
-
-        // Level horizon off: the head's pitch/roll, wobble filtered, flips passed.
-        std::optional<math::Quat> tilt;
-        if (body && !options.level_horizon)
-            tilt = math::steady_tilt(c.tilt_rig, first_person::orientation(matrix), rig_elapsed, options.tilt_filter, 4.0f);
-        // Bail camera. A wipeout shows as off the board (state 504, which the game also uses
-        // for walking) with the head tilted past 65 degrees for 0.15 s; walking and running
-        // stay under 50 (measured: 47 running, 49 getting on, 81-123 in a bail).
-        // It ends once the head is upright for 0.4 s or the skater is back on the board.
-        if (body && frame_end) {
-            const bool on_board = body->on_board || (body->physics_state >= 100 && body->physics_state < 500);
-            const float up = matrix[5]; // the head's up axis, vertical part
-            if (!options.bail_camera || options.view_mode != 0 || on_board) {
-                c.bail = false;
-                c.tilted_since = 0;
-            } else if (!c.bail) {
-                c.tilted_since = up < 0.4226f ? (c.tilted_since > 0 ? c.tilted_since : now) : 0;
-                if (c.tilted_since > 0 && now - c.tilted_since > 0.15) {
-                    c.bail = true;
-                    c.upright_since = 0;
-                }
-            } else {
-                c.upright_since = up > 0.819f ? (c.upright_since > 0 ? c.upright_since : now) : 0;
-                if (c.upright_since > 0 && now - c.upright_since > 0.4) c.bail = false;
-            }
-            // Grabs: in the air (state 200-299) with a trigger held; it ends 0.25 s after.
-            const bool airborne = body->physics_state >= 200 && body->physics_state < 300;
-            if (airborne && (options.grab_view || options.grab_body) && options.view_mode == 0) {
-                int pressed = trigger_level.load(std::memory_order_relaxed);
-                if (const auto vr_pad = controller_pad(); vr_pad.active)
-                    pressed = std::max({pressed, static_cast<int>(vr_pad.left_trigger), static_cast<int>(vr_pad.right_trigger)});
-                if (pressed < 100) pressed = std::max(pressed, static_cast<int>(xinput_peek().trigger));
-                if (pressed >= 100) c.grab_seen = now;
-            }
-            c.grab = (options.grab_view || options.grab_body) && options.view_mode == 0 && c.grab_seen > 0 &&
-                now - c.grab_seen < 0.25;
-            // The outside view: the flip & bail view, or a grab with Grab view on. It starts 3 m
-            // behind and 1.2 m above along the view heading and follows the skater.
-            const bool outside = c.bail || (c.grab && options.grab_view);
-            const auto behind = first_person::rotate(math::yaw(c.outside ? c.bail_heading : c.heading), {0, 1.2f, 3.0f});
-            if (outside && !c.outside) {
-                c.bail_heading = c.heading;
-                for (std::size_t i = 0; i < 3; ++i) c.bail_eye[i] = body->origin[i] + behind[i];
-            } else if (outside) {
-                const float follow = 1 - std::exp(-std::clamp(rig_elapsed, 0.0f, 0.5f) / 0.3f);
-                for (std::size_t i = 0; i < 3; ++i) c.bail_eye[i] += (body->origin[i] + behind[i] - c.bail_eye[i]) * follow;
-            }
-            c.outside = outside;
-            body_showing.store(c.bail || c.grab, std::memory_order_relaxed);
-        }
-        if (c.outside) {
-            behind_camera = true;
-            offset = first_person::rotate(math::yaw(c.bail_heading), {0, 1.2f, 3.0f});
-            for (std::size_t i = 0; i < 3; ++i) anchor[i] = c.bail_eye[i] - offset[i];
-        }
-        if (behind_camera) {
-            // Keep the camera out of slopes behind the skater. The ground: 0.3 m below any body
-            // origin the trail has near the camera (about 1.2 m under it; within 1.5 m, wider the
-            // farther the camera is), and the slope ridden now continued back to the camera
-            // (going down at a rise of s per metre, the ground d metres behind is s * d higher).
-            // The camera first pulls in towards the skater (keeping them in view on steep drops),
-            // then lifts for what is left. Both move at once towards the skater, slowly back.
-            const float speed = std::hypot(c.velocity[0], c.velocity[1]);
-            const bool airborne = body && body->physics_state >= 200 && body->physics_state < 300;
-            const float slope = body && !airborne && c.climb < -0.5f ? std::min(-c.climb / std::max(speed, 0.5f), 3.0f) : 0.0f;
-            const auto floor_at = [&](const std::array<float, 3>& spot) {
-                float floor = -std::numeric_limits<float>::infinity();
-                if (!body) return floor;
-                const float distance = std::hypot(spot[0] - body->origin[0], spot[2] - body->origin[2]);
-                const float reach = std::max(1.5f, 0.25f * distance);
-                for (const auto& point : c.trail)
-                    if (std::hypot(point[0] - spot[0], point[2] - spot[2]) < reach) floor = std::max(floor, point[1] + 0.3f);
-                if (slope > 0) floor = std::max(floor, body->origin[1] + slope * distance + 0.3f);
-                return floor;
-            };
-            const auto eye_at = [&](float share) {
-                return std::array<float, 3>{anchor[0] + offset[0] * share, anchor[1] + offset[1], anchor[2] + offset[2] * share};
-            };
-            float share = 0.3f;
-            for (const float candidate : {1.0f, 0.85f, 0.7f, 0.55f, 0.4f, 0.3f}) {
-                const auto spot = eye_at(candidate);
-                if (floor_at(spot) <= spot[1]) {
-                    share = candidate;
-                    break;
-                }
-            }
-            const float step = std::clamp(rig_elapsed, 0.0f, 0.5f);
-            if (frame_end) c.boom += (share - c.boom) * (1 - std::exp(-step / (share < c.boom ? 0.08f : 0.8f)));
-            const auto spot = eye_at(c.boom);
-            const float floor = floor_at(spot);
-            // At most 1.5 m: in a pipe the wall ridden counts as ground behind the camera, and
-            // floating far above the skater is worse than grazing the wall.
-            const float wanted = std::isfinite(floor) ? std::clamp(floor - spot[1], 0.0f, 1.5f) : 0.0f;
-            if (frame_end) c.lift += (wanted - c.lift) * (1 - std::exp(-step / (wanted > c.lift ? 0.08f : 0.8f)));
-            base[12] = spot[0];
-            base[13] = spot[1] + c.lift;
-            base[14] = spot[2];
-        } else {
-            c.lift = 0;
-            c.boom = 1;
-        }
-        // Comfort vignette: from how fast the view turns without the headset (body turns, snap
-        // and look turns, flips, the bail camera): none below 0.6 rad/s, full at 2 rad/s.
-        if (frame_end) {
-            const auto turn_now = c.outside ? math::yaw(c.bail_heading)
-                : tilt ? first_person::normalized(first_person::multiply(math::yaw(c.heading), *tilt))
-                : options.level_horizon ? math::yaw(c.heading) : first_person::orientation(base);
-            float rate = 0;
-            if (c.turn_ready && rig_elapsed > 0) {
-                float dot = 0;
-                for (std::size_t i = 0; i < 4; ++i) dot += c.last_turn[i] * turn_now[i];
-                rate = 2 * std::acos(std::clamp(std::abs(dot), 0.0f, 1.0f)) / rig_elapsed;
-            }
-            c.last_turn = turn_now;
-            c.turn_ready = true;
-            const float wanted = std::clamp((rate - 0.6f) / 1.4f, 0.0f, 1.0f);
-            const float seconds = wanted > c.vignette ? 0.08f : 0.4f; // quick in, slow out
-            c.vignette += (wanted - c.vignette) * (1 - std::exp(-std::clamp(rig_elapsed, 0.0f, 0.5f) / seconds));
-            // Moving the slider previews the setting at full strength for 2 s.
-            if (options.comfort_vignette != c.vignette_setting) {
-                c.vignette_setting = options.comfort_vignette;
-                c.vignette_preview_until = now + 2.0;
-            }
-            const float amount = (now < c.vignette_preview_until ? 1.0f : c.vignette) * options.comfort_vignette;
-            s.vignette.store(amount, std::memory_order_release);
-        }
-        const auto result = c.outside ? math::compose(base, c.bail_heading, true, eye, head, c.anchor, options.positional, options.world_scale)
-            : math::compose(base, c.heading, options.level_horizon, eye, head, c.anchor,
-            options.positional, options.world_scale, 0, 0, 0, tilt ? &*tilt : nullptr);
-        // Only the lanes we write; the fourth lane of each row is the game's and may hold anything.
-        for (std::size_t i = 0; i < 16; ++i)
-            if (i % 4 != 3 && !std::isfinite(result[i])) {
-                if (now - c.last_skip_log > 1.0) {
-                    c.last_skip_log = now;
-                    logging::write(logging::Level::warning, logging::Channel::graphics,
-                        std::format("VR: camera skipped: lane {} not finite (heading {}, eye orientation {} {} {} {}).", i,
-                            c.heading, eye.orientation[0], eye.orientation[1], eye.orientation[2], eye.orientation[3]));
-                }
-                return false;
-            }
-        matrix = result;
-        s.camera_fov_degrees.store(fov, std::memory_order_release);
-        s.camera_time.store(now, std::memory_order_release);
-        s.camera_thread.store(GetCurrentThreadId(), std::memory_order_relaxed);
-        c.last_write = now;
-        if (frame_end) {
-            {
-                std::lock_guard records(s.records_mutex);
-                // Record the frustum the game actually receives.
-                // Previously the eye record used the uncorrected FOV.
-                EyeRecord record{s.next_sequence++, view, eye,
-                    math::layer_angles(tangent * options.fov_correction, aspect)};
-                for (std::size_t i = 0; i < 2; ++i)
-                    record.headset_fov[i] = {views[i].fov.angleLeft, views[i].fov.angleRight,
-                        views[i].fov.angleUp, views[i].fov.angleDown};
-                if (side_by_side) {
-                    record.both = true;
-                    record.left = to_pose(views[0].pose);
-                    record.right = to_pose(views[1].pose);
-                }
-                s.records.push_back(record);
-                while (s.records.size() > 16) s.records.pop_front();
-            }
-            c.next_view = view ^ 1u;
-            s.camera_frames.fetch_add(1, std::memory_order_relaxed);
-        }
-        return true;
-    } catch (...) {
-        return false;
     }
+    float3 c = saturate(color.SampleLevel(linear_clamp, float2(x, scene_uv.y), 0).rgb);
+    if (decode == 0) c = srgb_to_linear(c);
+    return float4(comfort(c, v.uv, vignette), 1);
+}
+)";
+
+template<class Function>
+Function system_function(const wchar_t* module_name, const char* name) {
+    HMODULE module = GetModuleHandleW(module_name);
+    if (!module) module = LoadLibraryExW(module_name, nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
+    return module ? reinterpret_cast<Function>(reinterpret_cast<void*>(GetProcAddress(module, name))) : nullptr;
+}
+std::string hresult(const char* what, HRESULT result) {
+    return std::format("{} failed (0x{:08x}).", what, static_cast<unsigned long>(result));
+}
+bool compile(pD3DCompile compiler, const char* entry, const char* target, ComPtr<ID3DBlob>& out, std::string& error) {
+    ComPtr<ID3DBlob> messages;
+    const HRESULT result = compiler(shader_source, sizeof(shader_source) - 1, "reskate_vr_stereo", nullptr, nullptr, entry,
+        target, D3DCOMPILE_OPTIMIZATION_LEVEL3, 0, &out, &messages);
+    if (SUCCEEDED(result)) return true;
+    error = hresult("Compiling the VR stereo shader", result);
+    if (messages) error += std::string(" ") + static_cast<const char*>(messages->GetBufferPointer());
+    return false;
+}
+D3D12_RESOURCE_BARRIER transition(ID3D12Resource* resource, D3D12_RESOURCE_STATES before, D3D12_RESOURCE_STATES after,
+    UINT subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES) {
+    D3D12_RESOURCE_BARRIER barrier{};
+    barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+    barrier.Transition = {resource, subresource, before, after};
+    return barrier;
+}
 }
 
-float camera_fov(float requested) noexcept {
-    auto& s = shared();
-    if (!camera_active(seconds_now())) return requested;
-    const float fov = s.camera_fov_degrees.load(std::memory_order_acquire);
-    return fov > 0 ? fov : requested;
+bool DepthStereo::create(ID3D12Device* device, std::string& error) {
+    destroy();
+    const auto compiler = system_function<pD3DCompile>(L"d3dcompiler_47.dll", "D3DCompile");
+    const auto serialize = system_function<PFN_D3D12_SERIALIZE_ROOT_SIGNATURE>(L"d3d12.dll", "D3D12SerializeRootSignature");
+    if (!compiler || !serialize) { error = "d3dcompiler_47.dll or d3d12.dll is unavailable."; return false; }
+    if (!compile(compiler, "vs_main", "vs_5_0", vertex_, error) || !compile(compiler, "ps_main", "ps_5_0", pixel_, error) ||
+        !compile(compiler, "ps_dilate", "ps_5_0", dilate_, error))
+        return false;
+    D3D12_DESCRIPTOR_RANGE range{};
+    range.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+    range.NumDescriptors = 2;
+    std::array<D3D12_ROOT_PARAMETER, 2> parameters{};
+    parameters[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+    parameters[0].DescriptorTable = {1, &range};
+    parameters[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+    parameters[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
+    parameters[1].Constants = {0, 0, 9};
+    parameters[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+    D3D12_STATIC_SAMPLER_DESC sampler{};
+    sampler.Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
+    sampler.AddressU = sampler.AddressV = sampler.AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+    sampler.MaxLOD = D3D12_FLOAT32_MAX;
+    sampler.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+    D3D12_ROOT_SIGNATURE_DESC root{};
+    root.NumParameters = static_cast<UINT>(parameters.size());
+    root.pParameters = parameters.data();
+    root.NumStaticSamplers = 1;
+    root.pStaticSamplers = &sampler;
+    ComPtr<ID3DBlob> blob, messages;
+    HRESULT result = serialize(&root, D3D_ROOT_SIGNATURE_VERSION_1, &blob, &messages);
+    if (FAILED(result)) { error = hresult("Serializing the VR stereo root signature", result); return false; }
+    result = device->CreateRootSignature(0, blob->GetBufferPointer(), blob->GetBufferSize(), IID_PPV_ARGS(&root_));
+    if (FAILED(result)) { error = hresult("Creating the VR stereo root signature", result); return false; }
+    D3D12_DESCRIPTOR_HEAP_DESC heap{};
+    heap.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+    heap.NumDescriptors = slots * 4; // per slot: colour + depth for the eyes, (unused) + raw depth for the widening
+    heap.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+    result = device->CreateDescriptorHeap(&heap, IID_PPV_ARGS(&srvs_));
+    if (FAILED(result)) { error = hresult("Creating the VR stereo SRV heap", result); return false; }
+    heap.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
+    heap.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
+    result = device->CreateDescriptorHeap(&heap, IID_PPV_ARGS(&rtvs_));
+    if (FAILED(result)) { error = hresult("Creating the VR stereo RTV heap", result); return false; }
+    srv_stride_ = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+    rtv_stride_ = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
+    for (auto& allocator : allocators_) {
+        result = device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&allocator));
+        if (FAILED(result)) { error = hresult("Creating a VR stereo command allocator", result); return false; }
+    }
+    result = device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, allocators_[0].Get(), nullptr, IID_PPV_ARGS(&list_));
+    if (FAILED(result)) { error = hresult("Creating the VR stereo command list", result); return false; }
+    list_->Close();
+    list_->SetName(L"ReSkate VR depth stereo");
+    result = device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence_));
+    if (FAILED(result)) { error = hresult("Creating the VR stereo fence", result); return false; }
+    event_ = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+    if (!event_) { error = "Creating the VR stereo fence event failed."; return false; }
+    device_ = device;
+    return true;
+}
+
+bool DepthStereo::wait(UINT64 value, DWORD timeout_ms) noexcept {
+    if (!value || !fence_) return true;
+    const auto done = fence_->GetCompletedValue();
+    if (done == UINT64_MAX) return false;
+    if (done >= value) return true;
+    if (FAILED(fence_->SetEventOnCompletion(value, event_))) return false;
+    if (WaitForSingleObject(event_, timeout_ms) != WAIT_OBJECT_0) return false;
+    return fence_->GetCompletedValue() >= value;
+}
+bool DepthStereo::wait_idle(DWORD timeout_ms) noexcept { return wait(next_fence_, timeout_ms); }
+
+void DepthStereo::destroy() noexcept {
+    if (fence_) (void)wait_idle(2000);
+    pipelines_.clear();
+    list_.Reset();
+    for (auto& allocator : allocators_) allocator.Reset();
+    slot_fences_ = {};
+    srvs_.Reset(); rtvs_.Reset(); root_.Reset(); vertex_.Reset(); pixel_.Reset(); dilate_.Reset(); fence_.Reset(); kept_.Reset();
+    kept_depth_.Reset(); widened_.Reset();
+    if (event_) CloseHandle(event_);
+    event_ = nullptr;
+    next_fence_ = 0;
+    slot_ = 0;
+    kept_format_ = DXGI_FORMAT_UNKNOWN;
+    device_.Reset();
+}
+
+ID3D12PipelineState* DepthStereo::pipeline(DXGI_FORMAT format, std::string& error, bool dilate) {
+    const int key = static_cast<int>(format) | (dilate ? 0x10000 : 0);
+    if (const auto found = pipelines_.find(key); found != pipelines_.end()) return found->second.Get();
+    D3D12_GRAPHICS_PIPELINE_STATE_DESC desc{};
+    desc.pRootSignature = root_.Get();
+    desc.VS = {vertex_->GetBufferPointer(), vertex_->GetBufferSize()};
+    const auto& shader = dilate ? dilate_ : pixel_;
+    desc.PS = {shader->GetBufferPointer(), shader->GetBufferSize()};
+    for (auto& target : desc.BlendState.RenderTarget) {
+        target.SrcBlend = target.SrcBlendAlpha = D3D12_BLEND_ONE;
+        target.DestBlend = target.DestBlendAlpha = D3D12_BLEND_ZERO;
+        target.BlendOp = target.BlendOpAlpha = D3D12_BLEND_OP_ADD;
+        target.LogicOp = D3D12_LOGIC_OP_NOOP;
+        target.RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
+    }
+    desc.DepthStencilState.DepthEnable = FALSE;
+    desc.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
+    desc.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_ALWAYS;
+    desc.DepthStencilState.FrontFace = desc.DepthStencilState.BackFace = {D3D12_STENCIL_OP_KEEP, D3D12_STENCIL_OP_KEEP,
+        D3D12_STENCIL_OP_KEEP, D3D12_COMPARISON_FUNC_ALWAYS};
+    desc.SampleMask = UINT_MAX;
+    desc.RasterizerState.FillMode = D3D12_FILL_MODE_SOLID;
+    desc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
+    desc.RasterizerState.DepthClipEnable = TRUE;
+    desc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+    desc.NumRenderTargets = 1;
+    desc.RTVFormats[0] = format;
+    desc.SampleDesc.Count = 1;
+    ComPtr<ID3D12PipelineState> state;
+    const HRESULT result = device_->CreateGraphicsPipelineState(&desc, IID_PPV_ARGS(&state));
+    if (FAILED(result)) { error = hresult("Creating the VR stereo pipeline", result); return nullptr; }
+    return (pipelines_[key] = state).Get();
+}
+
+bool DepthStereo::begin(std::string& error) {
+    if (!device_) { error = "The VR stereo pass is not initialised."; return false; }
+    if (!wait(slot_fences_[slot_], 1000)) { error = "The GPU did not finish an earlier VR stereo pass."; return false; }
+    HRESULT result = allocators_[slot_]->Reset();
+    if (SUCCEEDED(result)) result = list_->Reset(allocators_[slot_].Get(), nullptr);
+    if (FAILED(result)) { error = hresult("Resetting the VR stereo command list", result); return false; }
+    return true;
+}
+
+bool DepthStereo::submit(ID3D12CommandQueue* queue, std::string& error) {
+    HRESULT result = list_->Close();
+    if (FAILED(result)) { error = hresult("Closing the VR stereo command list", result); return false; }
+    ID3D12CommandList* lists[] = {list_.Get()};
+    queue->ExecuteCommandLists(1, lists);
+    const UINT64 signal = ++next_fence_;
+    result = queue->Signal(fence_.Get(), signal);
+    if (FAILED(result)) { error = hresult("Signalling the VR stereo fence", result); return false; }
+    slot_fences_[slot_] = signal;
+    slot_ = (slot_ + 1) % slots;
+    return true;
+}
+
+bool DepthStereo::keep(ID3D12CommandQueue* queue, ID3D12Resource* frame, std::string& error) {
+    const auto desc = frame->GetDesc();
+    if (!kept_ || kept_->GetDesc().Width != desc.Width || kept_->GetDesc().Height != desc.Height || kept_format_ != desc.Format) {
+        if (!wait_idle(2000)) { error = "The GPU did not finish an earlier VR stereo pass."; return false; }
+        kept_.Reset();
+        auto copy = desc;
+        copy.Flags = D3D12_RESOURCE_FLAG_NONE;
+        copy.MipLevels = 1;
+        D3D12_HEAP_PROPERTIES heap{D3D12_HEAP_TYPE_DEFAULT};
+        const HRESULT result = device_->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &copy,
+            D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, nullptr, IID_PPV_ARGS(&kept_));
+        if (FAILED(result)) { error = hresult("Creating the VR stereo colour copy", result); return false; }
+        kept_format_ = desc.Format;
+    }
+    if (!begin(error)) return false;
+    const std::array<D3D12_RESOURCE_BARRIER, 2> before{
+        transition(frame, D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_COPY_SOURCE),
+        transition(kept_.Get(), D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COPY_DEST)};
+    list_->ResourceBarrier(static_cast<UINT>(before.size()), before.data());
+    list_->CopyResource(kept_.Get(), frame);
+    const std::array<D3D12_RESOURCE_BARRIER, 2> after{
+        transition(frame, D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_PRESENT),
+        transition(kept_.Get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE)};
+    list_->ResourceBarrier(static_cast<UINT>(after.size()), after.data());
+    return submit(queue, error);
+}
+
+bool DepthStereo::keep_depth(ID3D12CommandQueue* queue, ID3D12Resource* depth, int widening, std::string& error) {
+    const auto desc = depth->GetDesc();
+    if (!kept_depth_ || kept_depth_->GetDesc().Width != desc.Width || kept_depth_->GetDesc().Height != desc.Height ||
+        kept_depth_->GetDesc().Format != desc.Format) {
+        if (!wait_idle(2000)) { error = "The GPU did not finish an earlier VR stereo pass."; return false; }
+        kept_depth_.Reset();
+        D3D12_HEAP_PROPERTIES heap{D3D12_HEAP_TYPE_DEFAULT};
+        const HRESULT result = device_->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &desc,
+            D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, nullptr, IID_PPV_ARGS(&kept_depth_));
+        if (FAILED(result)) { error = hresult("Creating the VR stereo depth copy", result); return false; }
+    }
+    if (!begin(error)) return false;
+    const std::array<D3D12_RESOURCE_BARRIER, 2> before{
+        transition(depth, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_COPY_SOURCE, 0),
+        transition(kept_depth_.Get(), D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COPY_DEST, 0)};
+    list_->ResourceBarrier(static_cast<UINT>(before.size()), before.data());
+    D3D12_TEXTURE_COPY_LOCATION to{kept_depth_.Get(), D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX, {}};
+    D3D12_TEXTURE_COPY_LOCATION from{depth, D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX, {}};
+    list_->CopyTextureRegion(&to, 0, 0, 0, &from, nullptr);
+    const std::array<D3D12_RESOURCE_BARRIER, 2> after{
+        transition(depth, D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_COPY_DEST, 0),
+        transition(kept_depth_.Get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, 0)};
+    list_->ResourceBarrier(static_cast<UINT>(after.size()), after.data());
+
+    // Widen the near depth into an R32 target the eyes read.
+    if (!widened_ || widened_->GetDesc().Width != desc.Width || widened_->GetDesc().Height != desc.Height) {
+        widened_.Reset();
+        D3D12_RESOURCE_DESC target{};
+        target.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+        target.Width = desc.Width;
+        target.Height = desc.Height;
+        target.DepthOrArraySize = target.MipLevels = 1;
+        target.Format = DXGI_FORMAT_R32_FLOAT;
+        target.SampleDesc.Count = 1;
+        target.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
+        D3D12_HEAP_PROPERTIES heap{D3D12_HEAP_TYPE_DEFAULT};
+        const HRESULT result = device_->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &target,
+            D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, nullptr, IID_PPV_ARGS(&widened_));
+        if (FAILED(result)) { error = hresult("Creating the VR stereo widened depth", result); return false; }
+    }
+    auto* state = pipeline(DXGI_FORMAT_R32_FLOAT, error, true);
+    if (!state) return false;
+    list_->SetPipelineState(state);
+    auto srv = srvs_->GetCPUDescriptorHandleForHeapStart();
+    srv.ptr += static_cast<SIZE_T>(slot_ * 4 + 2) * srv_stride_;
+    auto srv_gpu = srvs_->GetGPUDescriptorHandleForHeapStart();
+    srv_gpu.ptr += static_cast<UINT64>(slot_ * 4 + 2) * srv_stride_;
+    D3D12_SHADER_RESOURCE_VIEW_DESC view{};
+    view.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+    view.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    view.Texture2D.MipLevels = 1;
+    view.Format = kept_format_ != DXGI_FORMAT_UNKNOWN ? kept_format_ : DXGI_FORMAT_R8G8B8A8_UNORM;
+    if (kept_) device_->CreateShaderResourceView(kept_.Get(), &view, srv); // t0, unused by the widening
+    view.Format = DXGI_FORMAT_R32_FLOAT; // the depth copy is R32_TYPELESS (vr_depth.cpp)
+    auto depth_srv = srv;
+    depth_srv.ptr += srv_stride_;
+    device_->CreateShaderResourceView(kept_depth_.Get(), &view, depth_srv);
+    auto rtv = rtvs_->GetCPUDescriptorHandleForHeapStart();
+    rtv.ptr += static_cast<SIZE_T>(slot_ * 2) * rtv_stride_;
+    D3D12_RENDER_TARGET_VIEW_DESC target_view{};
+    target_view.Format = DXGI_FORMAT_R32_FLOAT;
+    target_view.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2D;
+    device_->CreateRenderTargetView(widened_.Get(), &target_view, rtv);
+    list_->ResourceBarrier(1, std::array{transition(widened_.Get(), D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
+        D3D12_RESOURCE_STATE_RENDER_TARGET)}.data());
+    ID3D12DescriptorHeap* heaps[] = {srvs_.Get()};
+    list_->SetDescriptorHeaps(1, heaps);
+    list_->SetGraphicsRootSignature(root_.Get());
+    list_->SetGraphicsRootDescriptorTable(0, srv_gpu);
+    const std::array<UINT, 4> radius{static_cast<UINT>(std::clamp(widening, 0, 3)), 0, 0, 0};
+    list_->SetGraphicsRoot32BitConstants(1, static_cast<UINT>(radius.size()), radius.data(), 0);
+    list_->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    const D3D12_VIEWPORT viewport{0, 0, static_cast<float>(desc.Width), static_cast<float>(desc.Height), 0, 1};
+    const D3D12_RECT scissor{0, 0, static_cast<LONG>(desc.Width), static_cast<LONG>(desc.Height)};
+    list_->RSSetViewports(1, &viewport);
+    list_->RSSetScissorRects(1, &scissor);
+    list_->OMSetRenderTargets(1, &rtv, FALSE, nullptr);
+    list_->DrawInstanced(3, 1, 0, 0);
+    list_->ResourceBarrier(1, std::array{transition(widened_.Get(), D3D12_RESOURCE_STATE_RENDER_TARGET,
+        D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE)}.data());
+    return submit(queue, error);
+}
+
+bool DepthStereo::render(ID3D12CommandQueue* queue, const std::array<ID3D12Resource*, 2>& targets, DXGI_FORMAT target_format,
+    const StereoParams& params, bool raw, std::string& error) {
+    if (!kept_ || !widened_) { error = "No frame kept for the VR stereo pass yet."; return false; }
+    auto* state = pipeline(target_format, error);
+    if (!state || !begin(error)) return false;
+    list_->SetPipelineState(state);
+    auto srv = srvs_->GetCPUDescriptorHandleForHeapStart();
+    srv.ptr += static_cast<SIZE_T>(slot_) * 4 * srv_stride_;
+    auto srv_gpu = srvs_->GetGPUDescriptorHandleForHeapStart();
+    srv_gpu.ptr += static_cast<UINT64>(slot_) * 4 * srv_stride_;
+    D3D12_SHADER_RESOURCE_VIEW_DESC view{};
+    view.Format = kept_format_;
+    view.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+    view.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    view.Texture2D.MipLevels = 1;
+    device_->CreateShaderResourceView(kept_.Get(), &view, srv);
+    view.Format = DXGI_FORMAT_R32_FLOAT;
+    auto depth_srv = srv;
+    depth_srv.ptr += srv_stride_;
+    device_->CreateShaderResourceView(widened_.Get(), &view, depth_srv);
+
+    ID3D12DescriptorHeap* heaps[] = {srvs_.Get()};
+    list_->SetDescriptorHeaps(1, heaps);
+    list_->SetGraphicsRootSignature(root_.Get());
+    list_->SetGraphicsRootDescriptorTable(0, srv_gpu);
+    list_->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    const UINT mode = (raw ? 2u : kept_format_ == DXGI_FORMAT_R16G16B16A16_FLOAT ? 1u : 0u) | (params.background_fill ? 0x100u : 0u);
+    for (std::size_t eye = 0; eye < targets.size(); ++eye) {
+        auto rtv = rtvs_->GetCPUDescriptorHandleForHeapStart();
+        rtv.ptr += static_cast<SIZE_T>(slot_ * 2 + eye) * rtv_stride_;
+        D3D12_RENDER_TARGET_VIEW_DESC target_view{};
+        target_view.Format = target_format;
+        target_view.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2D;
+        device_->CreateRenderTargetView(targets[eye], &target_view, rtv);
+        // Left eye (+1): near points move right in its image; right eye (-1): left.
+        const float side = eye == 0 ? 1.0f : -1.0f;
+        std::array<UINT, 9> constants{mode, 0, 0, 0, 0, 0, 0, 0, 0};
+        std::memcpy(&constants[1], &side, sizeof(float));
+        std::memcpy(&constants[2], &params.scale, sizeof(float));
+        std::memcpy(&constants[3], &params.max_shift, sizeof(float));
+        std::memcpy(&constants[4], &params.vignette, sizeof(float));
+        std::memcpy(&constants[5], &params.u_scale[eye], sizeof(float));
+        std::memcpy(&constants[6], &params.v_scale[eye], sizeof(float));
+        std::memcpy(&constants[7], &params.u_bias[eye], sizeof(float));
+        std::memcpy(&constants[8], &params.v_bias[eye], sizeof(float));
+        list_->SetGraphicsRoot32BitConstants(1, static_cast<UINT>(constants.size()), constants.data(), 0);
+        const auto desc = targets[eye]->GetDesc();
+        const D3D12_VIEWPORT viewport{0, 0, static_cast<float>(desc.Width), static_cast<float>(desc.Height), 0, 1};
+        const D3D12_RECT scissor{0, 0, static_cast<LONG>(desc.Width), static_cast<LONG>(desc.Height)};
+        list_->RSSetViewports(1, &viewport);
+        list_->RSSetScissorRects(1, &scissor);
+        list_->OMSetRenderTargets(1, &rtv, FALSE, nullptr);
+        list_->DrawInstanced(3, 1, 0, 0);
+    }
+    return submit(queue, error);
 }
 }

@@ -184,6 +184,23 @@ inline Quat steady_tilt(TiltRig& rig, const Quat& head, float elapsed, float sec
     return rig.value = first_person::normalized(mixed);
 }
 
+// Calibrate the root's facing once from the torso, then ignore torso animation.
+struct PlayerHeading {
+    bool ready = false;
+    float offset = 0, value = 0;
+};
+inline float player_heading(PlayerHeading& rig, float trajectory, float chest) {
+    if (!rig.ready && std::isfinite(chest)) {
+        rig.value = wrap(chest);
+        if (std::isfinite(trajectory)) {
+            rig.offset = wrap(chest - trajectory);
+            rig.ready = true;
+        }
+    }
+    if (rig.ready && std::isfinite(trajectory)) rig.value = wrap(trajectory + rig.offset);
+    return rig.value;
+}
+
 // A rigid player eye origin: sample the avatar's eye once, then follow locomotion.
 // HMD rotation/translation are composed separately, never filtered through animation.
 struct HeadOrigin {

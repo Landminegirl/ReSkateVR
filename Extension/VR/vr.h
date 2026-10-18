@@ -18,6 +18,7 @@
 #include <array>
 #include <atomic>
 #include <cstdint>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -137,6 +138,12 @@ struct Settings {
     int recenter_key = 0x77;
 };
 
+// An explicit standard start must override a previously saved VR-on preference.
+inline Settings apply_launch_choice(Settings value, char choice) noexcept {
+    if (choice == '0' || choice == '1') value.enabled = choice == '1';
+    return value;
+}
+
 // Camera-only migration preserves the player's stereo, FOV and image pairing.
 inline Settings quest2_head_camera(Settings value) noexcept {
     value.head_centred = true;
@@ -255,6 +262,7 @@ struct BodyPose {
     bool on_board = false;
     std::uint32_t physics_state = 0; // the game's skater physics state (300 wipeout); 0 unknown
     std::array<float, 16> board{};   // the board's world matrix while on it; zero otherwise
+    float trajectory_heading = std::numeric_limits<float>::quiet_NaN();
 };
 // Moves a native camera matrix (rows right, up, backward, position; fourth
 // lanes left as they are) to this frame's eye. Returns false, leaving the

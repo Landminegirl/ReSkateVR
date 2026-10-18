@@ -191,14 +191,17 @@ void load() noexcept {
         clamp_choices(value);
         // Out-of-range saves keep the defaults rather than half-applying.
         wchar_t launch[2]{};
-        const bool start_vr = GetEnvironmentVariableW(L"RESKATE_VR_LAUNCH", launch, 2) == 1 && launch[0] == L'1';
+        const auto launch_length = GetEnvironmentVariableW(L"RESKATE_VR_LAUNCH", launch, 2);
+        const char launch_choice = launch_length == 1 && (launch[0] == L'0' || launch[0] == L'1')
+            ? static_cast<char>(launch[0]) : '\0';
+        const bool start_vr = launch_choice == '1';
         const bool first_quest2_launch = start_vr &&
             !profile_runtime::local_preference("VR.Quest2Setup").value_or(false);
         if (first_quest2_launch) value = quest2_balanced(value);
         const bool camera_update = start_vr &&
             !profile_runtime::local_preference("VR.Quest2HeadCameraV2").value_or(false);
         if (camera_update) value = quest2_head_camera(value);
-        if (start_vr) value.enabled = true;
+        value = apply_launch_choice(value, launch_choice);
         if (set_settings(value) && (first_quest2_launch || camera_update)) {
             // Migrate old VR settings once; preserve the player's later adjustments.
             std::vector<std::pair<std::string, Json>> values;

@@ -1,10 +1,11 @@
-# Quest 2 alignment and one-click launcher
+# Quest 2 alignment, head camera and Play / Launch VR
 
 Player download: copy the compiled DLL, launcher and OpenXR loader into an
 existing ReSkate installation, connect Link / Air Link, and click LAUNCH VR.
 See PLAY.txt. Players do not need a terminal or development tools.
 
-The launcher sends a session-only VR start request and requests a 2048-square
+PLAY disables VR for that session and preserves saved display options.
+LAUNCH VR sends a session-only VR start request and requests a 2048-square
 window without changing saved launcher display preferences. The runtime loads
 the player's profile, applies the shared Quest 2 balanced preset once, and
 preserves subsequent tuning. Future VR starts enable VR with that saved tuning.
@@ -41,9 +42,12 @@ Base source: b19a2c920364223fffc874fd2350806aac8fdcdf on cesarcc2/ReSkateVR's vr
 A HeadOrigin samples the native eye position relative to player locomotion once,
 then follows that rigid player frame. It is resampled on recenter, teleport, or
 mode changes. Animated eye position and head-bone yaw no longer drive this mode.
-The HMD's tracked pose remains independent and unfiltered. The player rig still
-turns with torso heading on the board; this is not a replacement for native VR
-locomotion and still needs testing through skating maneuvers.
+The HMD's tracked pose remains independent and unfiltered. The v3 player rig
+turns with the trajectory root, calibrated once against the torso heading.
+Subsequent animated torso turns and invalid samples cannot reset that heading.
+Tick and render camera writers both use the raw head snapshot and body frame;
+standard first person retains its normal spring smoothing. This still needs
+physical testing through skating maneuvers.
 
 The camera-only profile migration zeroes both board and on-foot offsets,
 enables positional tracking and a level horizon, and disables automatic outside
@@ -56,3 +60,20 @@ Native tests cover stationary rotation through near-vertical pitch and roll,
 orthonormal camera axes, direct lean, animation isolation, locomotion, recenter
 resampling, and preservation of existing stereo calibration during migration.
 Physical Quest 2 testing and sustained frame-rate measurements remain outstanding.
+
+## v3 launcher and game HUD
+
+Both PLAY and LAUNCH VR remain available after installation. A session-only
+explicit 0/1 request overrides the saved VR enabled state without saving that
+choice over the user's calibrated profile. The selected action survives mod
+update and merge prompts. Tests exercise saved display options and profile
+calibration preservation for both choices.
+
+ADDONS > VR > Show game HUD uses the existing native game UI visibility
+control for scores, objectives and indicators. It is enabled when the native
+UI control is available. The HUD remains part of the reconstructed source
+image; this does not extract it into a separately rendered headset layer.
+
+Regression tests cover torso motion, missing headings and real trajectory
+turns during pushes. Pitch distortion and frame pacing remain subject to
+headset testing and the single-view renderer's limits.

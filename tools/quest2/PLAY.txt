@@ -1,15 +1,20 @@
-RESKATE VR - QUEST 2 HEAD CAMERA v2 (EXPERIMENTAL)
+RESKATE VR - QUEST 2 CAMERA / LAUNCHER v3 (EXPERIMENTAL)
 
 INSTALL
 1. Close skate. and ReSkateLauncher. Back up the files from your current build.
 2. Extract this ZIP and drag its files into your existing ReSkate folder,
    beside Skate.exe and ReSkateLauncher.exe. Replace files when asked.
 3. Connect Meta Quest Link / Air Link. Open ReSkateLauncher.exe and click LAUNCH VR.
-4. Enter gameplay, sit/stand comfortably with your head straight, then press F8.
+4. For normal desktop play, click PLAY instead. This disables VR for that session.
+5. Enter gameplay, sit/stand comfortably with your head straight, then press F8.
 
 No PowerShell, Python, compiler or scripts are needed to play.
 
 WHAT CHANGED
+- Separate PLAY and LAUNCH VR buttons; standard play keeps your saved display options.
+- Push animations no longer supply the player rig heading; it follows the trajectory root.
+- Tick and render camera updates use the same raw head pose and player frame in VR.
+- ADDONS > VR > Show game HUD toggles scores, objectives and indicators.
 - The camera starts at the avatar's eye origin instead of behind and to one side.
 - A rigid player eye origin replaces following animated head bob and neck turns.
 - Physical headset rotation and leaning are applied directly, without animation filters.
@@ -31,9 +36,11 @@ starting point; the game can replace the launcher's requested square resolution
 when it loads saved display settings. Raise resolution once motion is stable.
 
 TEST STATUS
-Native rotation/lean/animation-isolation and preset-migration checks pass.
+Native rotation/lean, push-heading, preset-migration and launch-mode checks pass.
 The Windows DLL and launcher compile; all three stereo shaders compile.
-The new camera has not yet been tested on a physical headset. If turning,
+This revision has not yet been tested on a physical headset.
+The HUD is the game HUD included in the reconstructed image; edge placement
+and depth can retain reconstruction artifacts. It is not a separate floating panel. If turning,
 pitch or roll still causes stretching or double vision, stop and report it.
 Do not force yourself to keep testing an uncomfortable image.
 

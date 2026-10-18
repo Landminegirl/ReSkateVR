@@ -213,6 +213,23 @@ int main() {
         CHECK(near(native_fov_degrees(tall, 0.5f, false), 2 * 0.95f * 180 / pi, 1e-2f));
         CHECK(near(render_tangent({left, right}, 1.0f, 1.1f), 1.1f * std::tan(0.95f)));
     }
+    // A push bends/twists the torso and can make its heading invalid. Neither
+    // may change the rig yaw; only the trajectory root's actual turn does.
+    {
+        PlayerHeading rig;
+        CHECK(near(player_heading(rig, 0.7f, 1.2f), 1.2f));
+        CHECK(near(player_heading(rig, 0.7f, NAN), 1.2f));
+        CHECK(near(player_heading(rig, 0.7f, -1.8f), 1.2f));
+        CHECK(near(player_heading(rig, 0.8f, NAN), 1.3f));
+        CHECK(near(player_heading(rig, NAN, NAN), 1.3f));
+        // Missing samples must hold the last valid orientation, never reset to zero.
+        CHECK(near(player_heading(rig, NAN, -2.0f), 1.3f));
+        PlayerHeading uncalibrated;
+        CHECK(std::isfinite(player_heading(uncalibrated, NAN, NAN)));
+        CHECK(near(player_heading(uncalibrated, 0.7f, 1.2f), 1.2f));
+        for (float chest : {0.2f, NAN, -0.8f, 1.3f, NAN, 0.2f})
+            CHECK(near(player_heading(rig, 0.8f, chest), 1.3f));
+    }
     // Animation cannot move the rigid head origin after calibration; locomotion can.
     {
         HeadOrigin rig;

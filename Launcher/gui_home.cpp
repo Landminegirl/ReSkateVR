@@ -171,7 +171,7 @@ void draw_plate(ImDrawList* draw, const Fonts& fonts, ImVec2 position, const std
 
 // The big action tile: blue like skate.'s selected tile, grey and scribbled when locked.
 bool action_tile(ImDrawList* draw, const Fonts& fonts, ImVec2 position, ImVec2 size, const char* label,
-                 const std::string& detail, bool enabled, bool secondary, const std::string& mark = {}) {
+                 const std::string& detail, bool enabled, bool secondary, const std::string& mark = {}, bool compact = false) {
     bool hovered{};
     const bool pressed = tile_hit("##primary", position, size, enabled, hovered);
     const ImVec2 end(position.x + size.x, position.y + size.y);
@@ -180,7 +180,8 @@ bool action_tile(ImDrawList* draw, const Fonts& fonts, ImVec2 position, ImVec2 s
     if (!enabled) scribble(draw, position, end, 7);
     if (hovered) draw->AddRect(ImVec2(position.x - S(3), position.y - S(3)), ImVec2(end.x + S(3), end.y + S(3)), color::text, 0, 0, S(3));
     const ImU32 ink = blue ? color::ink : enabled ? color::text : rgba(160, 162, 168);
-    draw->AddText(fonts.action, fonts.action->FontSize, ImVec2(position.x + S(18), position.y + S(12)), ink, label);
+    auto* label_font = compact ? fonts.heading : fonts.action;
+    draw->AddText(label_font, label_font->FontSize, ImVec2(position.x + S(18), position.y + S(12)), ink, label);
     if (!detail.empty())
         draw->AddText(fonts.bold, fonts.bold->FontSize, ImVec2(position.x + S(20), end.y - S(20) - fonts.bold->FontSize),
             blue ? rgba(0, 0, 0, 0.72f) : color::muted, detail.c_str(), nullptr, size.x - S(40));
@@ -457,7 +458,7 @@ void frame(Launcher& launcher, const Fonts& fonts, HWND window, Ui& ui, ModsPane
 
     ImGui::BeginDisabled(modal);
     const float column = S(360);
-    const ImVec2 primary_size(column, S(160));
+    const ImVec2 primary_size(column, S(174));
     const ImVec2 primary(size.x - S(64) - column, size.y - S(56) - primary_size.y);
     // MODS sits directly under PLAY, where the eye already is, and is taller
     // than SETTINGS so it reads as a place to go rather than a toggle.
@@ -487,13 +488,14 @@ void frame(Launcher& launcher, const Fonts& fonts, HWND window, Ui& ui, ModsPane
     case Phase::launching: label = "LAUNCHING"; enabled = false; break;
     case Phase::failed: label = "RETRY"; break;
     }
-    const auto act = [&] {
+    const auto act = [&](bool launch_vr) {
         switch (state.phase) {
         case Phase::update_available: launcher.apply_updates(); break;
         case Phase::game_missing:
         case Phase::game_outdated: open_sign_in(launcher, ui, false); break;
         case Phase::downloading: launcher.cancel(); break;
         case Phase::ready:
+            launcher.select_launch(launch_vr);
             // Mods with updates waiting: ask first, once a session. Playing on
             // the old version is a choice, not a mistake, so it stays offered.
             if (ui.mods_pending && !ui.mods_updates_ignored) ui.mods_update_prompt = true;
@@ -506,9 +508,20 @@ void frame(Launcher& launcher, const Fonts& fonts, HWND window, Ui& ui, ModsPane
     const auto play_mark = state.phase == Phase::ready && ui.mods_pending
         ? (ui.mods_pending == 1 ? std::string("1 MOD UPDATE") : std::format("{} MOD UPDATES", ui.mods_pending))
         : std::string();
-    if (action_tile(draw, fonts, primary, primary_size, label, detail, enabled && !modal, secondary, play_mark)) act();
-    // A controller starts on PLAY.
-    if (!modal) default_focus();
+    if (state.phase == Phase::ready) {
+        const ImVec2 tile_size(column, S(80));
+        ImGui::PushID("standard-start");
+        if (action_tile(draw, fonts, primary, tile_size, "PLAY", "Standard game", enabled && !modal, true, play_mark, true)) act(false);
+        if (!modal) default_focus();
+        ImGui::PopID();
+        ImGui::PushID("vr-start");
+        const ImVec2 vr_position(primary.x, primary.y + S(94));
+        if (action_tile(draw, fonts, vr_position, tile_size, "LAUNCH VR", "Quest 2 / OpenXR", enabled && !modal, false, {}, true)) act(true);
+        ImGui::PopID();
+    } else {
+        if (action_tile(draw, fonts, primary, primary_size, label, detail, enabled && !modal, secondary, play_mark)) act(false);
+        if (!modal) default_focus();
+    }
     if (settings_tile(draw, fonts, settings, ImVec2(column, S(84)), !modal)) ui.settings = true;
     if (time - ui.mods_checked > 5 && !ui.mods) {
         std::size_t enabled_mods = 0, installed = 0;
@@ -546,8 +559,8 @@ void frame(Launcher& launcher, const Fonts& fonts, HWND window, Ui& ui, ModsPane
     if (changelog_tile(draw, fonts, ImVec2(S(60), size.y - S(56) - changelog_size.y), changelog_size, !modal))
         ui.changelog = true;
 
-    if (enabled && !secondary && !modal &&
-        (ImGui::IsKeyPressed(ImGuiKey_Enter, false) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, false))) act();
+    if (enabled && !secondary && !modal && (state.phase != Phase::ready || !ImGui::IsAnyItemFocused()) &&
+        (ImGui::IsKeyPressed(ImGuiKey_Enter, false) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, false))) act(false);
     ImGui::EndDisabled();
 
     status_tile(fonts, state, ImVec2(S(60), S(200)), S(430), time, launcher.session().paths.logs, modal);
