@@ -184,6 +184,8 @@ void vr_controls(SkateMenu& menu, const Model& model) {
         slider(menu, "Follow", "Seconds for the camera to swing behind your direction of travel.", options.turn_smoothing, 0,
             Limits::turn_smoothing_max, "%.2f s", set(options.turn_smoothing));
     }
+    if (toggle_row(menu, "Head-centred tracking", "Keep the headset at a fixed player eye origin instead of following animated head bob and neck turns.", options.head_centred))
+        changed = true;
     if (toggle_row(menu, "Level horizon", "Tricks don't tilt the view; only turns do.", options.level_horizon))
         changed = true;
     if (toggle_row(menu, "Head movement", "Leaning moves the camera, not just turning your head.", options.positional))

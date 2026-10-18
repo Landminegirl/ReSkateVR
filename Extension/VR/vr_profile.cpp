@@ -16,6 +16,7 @@ namespace key {
 constexpr const char* enabled = "VR.Enabled";
 constexpr const char* positional = "VR.Positional";
 constexpr const char* level_horizon = "VR.LevelHorizon";
+constexpr const char* head_centred = "VR.HeadCentred";
 constexpr const char* fov_vertical = "VR.FovVertical";
 constexpr const char* turn_smoothing = "VR.TurnSmoothing";
 constexpr const char* world_scale = "VR.WorldScale";
@@ -85,6 +86,7 @@ const std::array fields{
     Field{.key = key::enabled, .flag = &Settings::enabled},
     Field{.key = key::positional, .flag = &Settings::positional},
     Field{.key = key::level_horizon, .flag = &Settings::level_horizon},
+    Field{.key = key::head_centred, .flag = &Settings::head_centred},
     Field{.key = key::fov_vertical, .flag = &Settings::fov_vertical},
     Field{.key = key::turn_smoothing, .real = &Settings::turn_smoothing},
     Field{.key = key::world_scale, .real = &Settings::world_scale},
@@ -193,13 +195,17 @@ void load() noexcept {
         const bool first_quest2_launch = start_vr &&
             !profile_runtime::local_preference("VR.Quest2Setup").value_or(false);
         if (first_quest2_launch) value = quest2_balanced(value);
+        const bool camera_update = start_vr &&
+            !profile_runtime::local_preference("VR.Quest2HeadCameraV2").value_or(false);
+        if (camera_update) value = quest2_head_camera(value);
         if (start_vr) value.enabled = true;
-        if (set_settings(value) && first_quest2_launch) {
+        if (set_settings(value) && (first_quest2_launch || camera_update)) {
             // Migrate old VR settings once; preserve the player's later adjustments.
             std::vector<std::pair<std::string, Json>> values;
             const auto saved_values = to_json(value);
             for (const auto& field : fields) values.emplace_back(field.key, saved_values[field.key]);
             values.emplace_back("VR.Quest2Setup", Json(true));
+            values.emplace_back("VR.Quest2HeadCameraV2", Json(true));
             profile_runtime::set_local_values(values);
         }
         (void)take_settings_changed(); // The launch choice itself is session-only.

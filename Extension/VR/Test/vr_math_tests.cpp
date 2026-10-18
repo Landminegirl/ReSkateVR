@@ -213,6 +213,54 @@ int main() {
         CHECK(near(native_fov_degrees(tall, 0.5f, false), 2 * 0.95f * 180 / pi, 1e-2f));
         CHECK(near(render_tangent({left, right}, 1.0f, 1.1f), 1.1f * std::tan(0.95f)));
     }
+    // Animation cannot move the rigid head origin after calibration; locomotion can.
+    {
+        HeadOrigin rig;
+        const Vec3 origin{10, 2, -5}, eye{10.1f, 3.7f, -5.05f};
+        CHECK(near(head_origin(rig, eye, origin, 0.7f), eye));
+        CHECK(near(head_origin(rig, {10.5f, 3.0f, -4.2f}, origin, 0.7f), eye));
+        const auto moved = head_origin(rig, {}, {11, 2.2f, -7}, 0.7f);
+        CHECK(near(moved, {11.1f, 3.9f, -7.05f}));
+        rig = {};
+        CHECK(near(head_origin(rig, {11, 3.6f, -7}, {11, 2.2f, -7}, 0.7f), {11, 3.6f, -7}));
+    }
+    // Looking around rotates at the eye origin, including near-vertical pitch/roll.
+    {
+        const Vec3 eye_origin{4, 1.7f, -2};
+        const auto base = camera(yaw(0.6f), eye_origin);
+        const Pose head{};
+        for (float angle : {0.0f, 0.7f, -1.0f, 1.55f, -1.55f}) {
+            const Quat roll{0, 0, std::sin(angle / 2), std::cos(angle / 2)};
+            const Pose eye{first_person::multiply(yaw(0.4f), first_person::multiply(pitch(angle), roll)), {}};
+            const auto out = compose(base, 0.6f, true, eye, head, {}, true, 1.0f);
+            CHECK(near(row(out, 3), eye_origin));
+            CHECK(orthonormal_right_handed(out));
+            const auto expected = first_person::multiply(yaw(0.6f), eye.orientation);
+            CHECK(near(row(out, 0), first_person::rotate(expected, {1, 0, 0})));
+            CHECK(near(row(out, 1), first_person::rotate(expected, {0, 1, 0})));
+            CHECK(near(row(out, 2), first_person::rotate(expected, {0, 0, 1})));
+        }
+        // Physical lean is applied once, with no artificial neck pivot or smoothing.
+        const Pose lean{pitch(0.8f), {0.1f, -0.2f, -0.3f}};
+        const auto out = compose(base, 0.6f, true, lean, head, {}, true, 1.0f);
+        const auto translation = first_person::rotate(yaw(0.6f), lean.position);
+        CHECK(near(row(out, 3), first_person::add(eye_origin, translation)));
+    }
+    // Updating an existing install must not undo the eye alignment the player tuned.
+    {
+        dingosdk::vr::Settings saved;
+        saved.depth_strength = 0.27f;
+        saved.fov_correction = 1.23f;
+        saved.fov_scale = 1.07f;
+        saved.fov_vertical = false;
+        saved.frame_lag = 1;
+        const auto updated = dingosdk::vr::quest2_head_camera(saved);
+        CHECK(near(updated.depth_strength, saved.depth_strength));
+        CHECK(near(updated.fov_correction, saved.fov_correction) && near(updated.fov_scale, saved.fov_scale));
+        CHECK(!updated.fov_vertical && updated.frame_lag == 1);
+        CHECK(updated.head_centred && updated.level_horizon && updated.positional);
+        CHECK(near(updated.seat_forward, 0) && near(updated.seat_side, 0));
+    }
     // The one-click setup enables VR and keeps unrelated player calibration.
     {
         dingosdk::vr::Settings saved;
@@ -224,6 +272,11 @@ int main() {
         CHECK(near(balanced.world_scale, 1.0f) && near(balanced.fov_scale, 1.10f));
         CHECK(balanced.edge_widening == 1 && balanced.gap_fill == 1 && balanced.lens_effects_off);
         CHECK(near(balanced.fov_correction, 1.17f) && balanced.frame_lag == 3);
+        CHECK(balanced.head_centred && balanced.level_horizon && balanced.positional);
+        CHECK(near(balanced.seat_forward, 0) && near(balanced.seat_side, 0) && near(balanced.seat_up, 0));
+        CHECK(near(balanced.seat_forward_foot, 0) && near(balanced.seat_side_foot, 0) && near(balanced.seat_up_foot, 0));
+        CHECK(!balanced.bail_camera && !balanced.grab_view && !balanced.grab_body);
+        CHECK(near(balanced.crouch_follow, 0) && balanced.view_mode == 0);
     }
     // Test the production UV mapping: rays agree even when principal points differ.
     {

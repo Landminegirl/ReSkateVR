@@ -35,3 +35,24 @@ Headset optics, installed-game compatibility, Link behavior and runtime performa
 remain untested. This is single-view depth reconstruction and can retain artifacts.
 Binary auto-updates and built-in Spotify Connect are disabled for the test build.
 Base source: b19a2c920364223fffc874fd2350806aac8fdcdf on cesarcc2/ReSkateVR's vr branch.
+
+## Head camera v2
+
+A HeadOrigin samples the native eye position relative to player locomotion once,
+then follows that rigid player frame. It is resampled on recenter, teleport, or
+mode changes. Animated eye position and head-bone yaw no longer drive this mode.
+The HMD's tracked pose remains independent and unfiltered. The player rig still
+turns with torso heading on the board; this is not a replacement for native VR
+locomotion and still needs testing through skating maneuvers.
+
+The camera-only profile migration zeroes both board and on-foot offsets,
+enables positional tracking and a level horizon, and disables automatic outside
+cameras. It preserves saved depth, FOV and frame pairing. The frame delay still
+pairs source images; it no longer adds future-pose prediction in this mode.
+Existing source-to-eye projection is retained. Do not label pitch distortion or
+performance resolved until physical testing confirms it.
+
+Native tests cover stationary rotation through near-vertical pitch and roll,
+orthonormal camera axes, direct lean, animation isolation, locomotion, recenter
+resampling, and preservation of existing stereo calibration during migration.
+Physical Quest 2 testing and sustained frame-rate measurements remain outstanding.

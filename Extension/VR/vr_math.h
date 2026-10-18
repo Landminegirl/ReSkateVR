@@ -184,6 +184,20 @@ inline Quat steady_tilt(TiltRig& rig, const Quat& head, float elapsed, float sec
     return rig.value = first_person::normalized(mixed);
 }
 
+// A rigid player eye origin: sample the avatar's eye once, then follow locomotion.
+// HMD rotation/translation are composed separately, never filtered through animation.
+struct HeadOrigin {
+    bool ready = false;
+    Vec3 local{};
+};
+inline Vec3 head_origin(HeadOrigin& rig, const Vec3& native_eye, const Vec3& body, float body_heading) {
+    if (!rig.ready) {
+        rig.local = first_person::rotate(yaw(-body_heading), first_person::subtract(native_eye, body));
+        rig.ready = true;
+    }
+    return first_person::add(body, first_person::rotate(yaw(body_heading), rig.local));
+}
+
 inline Anchor anchor_from(const Pose& head) { return {heading(head.orientation), head.position}; }
 
 // The camera for one eye: `base` is the skater's head camera; `eye` and

@@ -1,34 +1,45 @@
-RESKATE VR - QUEST 2 TEST BUILD
+RESKATE VR - QUEST 2 HEAD CAMERA v2 (EXPERIMENTAL)
 
 INSTALL
-1. Close skate. and ReSkateLauncher. Back up your ReSkate folder.
+1. Close skate. and ReSkateLauncher. Back up the files from your current build.
 2. Extract this ZIP and drag its files into your existing ReSkate folder,
    beside Skate.exe and ReSkateLauncher.exe. Replace files when asked.
-3. Connect your Quest 2 through Meta Quest Link / Air Link.
-4. Open ReSkateLauncher.exe and click LAUNCH VR.
+3. Connect Meta Quest Link / Air Link. Open ReSkateLauncher.exe and click LAUNCH VR.
+4. Enter gameplay, sit/stand comfortably with your head straight, then press F8.
 
-No PowerShell, Python, compiler, or scripts are needed to play.
-The launcher enables VR, starts in a 2048 x 2048 window, and applies the
-Quest 2 balanced settings the first time. Your later VR adjustments are saved.
-The menu appears on a screen in the headset; the tracked VR camera takes
-over during gameplay. Press F8 to recenter after entering the game.
+No PowerShell, Python, compiler or scripts are needed to play.
 
-This is an add-on for an existing, working ReSkate installation. It does not
-include skate., game data, or Steam files. OpenXR must already be working
-through your Link / Air Link setup.
+WHAT CHANGED
+- The camera starts at the avatar's eye origin instead of behind and to one side.
+- A rigid player eye origin replaces following animated head bob and neck turns.
+- Physical headset rotation and leaning are applied directly, without animation filters.
+- Extra future head-pose prediction is removed; image pairing is kept as you set it.
+- Automatic flip/bail/grab camera changes are off in the starting camera setup.
+- The update keeps your existing depth, FOV calibration and eye-pairing settings.
+
+New camera defaults are applied once automatically after your profile loads.
+Later changes are saved normally. Head-centred tracking is a toggle in ADDONS > VR.
+F8 resamples the avatar eye origin as well as recentering headset tracking.
+
+SMOOTHNESS / DISPLAY
+This build changes tracking behavior, not the game's rendering architecture.
+If the game cannot reach the headset frame rate, head turns can still stutter.
+For the next test, use 72 Hz in Link, game frame limit Unlimited, V-Sync Off,
+frame generation Off and motion blur Off. Lower game graphics until it holds
+that rate. In the GAME's display menu, select Windowed and 1440 x 1440 as a
+starting point; the game can replace the launcher's requested square resolution
+when it loads saved display settings. Raise resolution once motion is stable.
 
 TEST STATUS
-Windows binaries, native math tests, and embedded shaders passed their checks.
-The eye-projection changes still need testing on a physical Quest 2.
-Game-version compatibility has not been verified on your installation.
-If you still see double vision, stop the test and report whether it is
-horizontal, vertical, or changes as you turn your head. You can restore the
-backed-up files with the game closed. Do not force yourself to keep testing
-an image that is uncomfortable.
+Native rotation/lean/animation-isolation and preset-migration checks pass.
+The Windows DLL and launcher compile; all three stereo shaders compile.
+The new camera has not yet been tested on a physical headset. If turning,
+pitch or roll still causes stretching or double vision, stop and report it.
+Do not force yourself to keep testing an uncomfortable image.
 
-This build preserves the original depth-search quality. It reconstructs
-stereo from one rendered view, so some edge artifacts remain possible.
-Built-in Spotify Connect is omitted. Binary auto-update is disabled for this
-test build. Matching source and licenses accompany this build.
+This remains stereo reconstructed from one view. It cannot yet promise the
+image stability, latency or quality of a game built for native VR.
+To roll back, close the game and restore the previous DLL and launcher.
+Auto-update and built-in Spotify Connect remain disabled for this test build.
 
 Matching source: https://github.com/Landminegirl/ReSkateVR/tree/quest2-eye-alignment

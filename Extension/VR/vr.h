@@ -37,6 +37,8 @@ struct Settings {
     // Only the skater's heading turns the view; the horizon stays level.
     // Off also follows the animated head's pitch and roll (strong motion).
     bool level_horizon = true;
+    // Keep the tracking origin fixed to the player, independent of head animation.
+    bool head_centred = false;
     // Seconds for the view to follow the skater's heading; 0 follows directly.
     float turn_smoothing = 0.61f;
     // Metres of game world per metre of real head movement and eye separation.
@@ -135,6 +137,19 @@ struct Settings {
     int recenter_key = 0x77;
 };
 
+// Camera-only migration preserves the player's stereo, FOV and image pairing.
+inline Settings quest2_head_camera(Settings value) noexcept {
+    value.head_centred = true;
+    value.positional = true;
+    value.level_horizon = true;
+    value.view_mode = 0;
+    value.seat_forward = value.seat_side = value.seat_up = 0;
+    value.seat_forward_foot = value.seat_side_foot = value.seat_up_foot = 0;
+    value.bail_camera = value.grab_view = value.grab_body = false;
+    value.crouch_follow = 0;
+    return value;
+}
+
 // Starting values shared by the launcher bootstrap and the in-game preset.
 inline Settings quest2_balanced(Settings value) noexcept {
     value.enabled = true;
@@ -146,7 +161,7 @@ inline Settings quest2_balanced(Settings value) noexcept {
     value.edge_widening = 1;
     value.gap_fill = 1;
     value.lens_effects_off = true;
-    return value;
+    return quest2_head_camera(value);
 }
 
 struct Limits {

@@ -230,6 +230,8 @@ struct Camera {
     // they took over (from the on-foot heading), and whether they drove the view last update.
     math::EyesHeading eyes;
     math::EyesPosition eyes_place;
+    math::HeadOrigin head_origin;
+    bool head_mode = false;
     float eyes_blend = 0;
     bool eyes_on = false;
     math::TiltRig tilt_rig;
@@ -313,7 +315,11 @@ bool apply_camera(std::array<float, 16>& matrix, CameraWriter writer, const Body
         if (predicted <= 0) return false;
         // This write's image reaches the screen `frame_lag` frames after the
         // frame the headset is waiting for now.
-        const XrTime display_time = predicted + period * static_cast<XrDuration>(options.frame_lag);
+        // Image pairing is separate from head prediction. Use the runtime's current
+        // predicted time in head-centred mode; old image poses remain attached to
+        // their images so OpenXR can reproject them correctly.
+        const XrTime display_time = options.head_centred ? predicted
+            : predicted + period * static_cast<XrDuration>(options.frame_lag);
         std::array<XrView, 2> views{};
         math::Pose head;
         if (!locate(s, display_time, views, head)) return false;
@@ -334,8 +340,9 @@ bool apply_camera(std::array<float, 16>& matrix, CameraWriter writer, const Body
             if (now - c.last_log > 1.0) {
                 c.last_log = now;
                 logging::write(logging::Level::info, logging::Channel::graphics,
-                    std::format("VR: recentred; head at ({:.2f}, {:.2f}, {:.2f}) m in the tracking space.",
-                        head.position[0], head.position[1], head.position[2]));
+                    std::format("VR: recentred; head at ({:.2f}, {:.2f}, {:.2f}) m; head-centred {}, frame pairing {}, extra prediction {} frames.",
+                        head.position[0], head.position[1], head.position[2], options.head_centred,
+                        options.frame_lag, options.head_centred ? 0 : options.frame_lag));
             }
             c.recenter_applied = recenter;
             c.heading = std::numeric_limits<float>::quiet_NaN();
@@ -344,6 +351,7 @@ bool apply_camera(std::array<float, 16>& matrix, CameraWriter writer, const Body
             c.heading_rig = {};
             c.eyes = {};
             c.eyes_place = {};
+            c.head_origin = {};
             c.eyes_on = false;
             c.tilt_rig = {};
         }
@@ -358,6 +366,7 @@ bool apply_camera(std::array<float, 16>& matrix, CameraWriter writer, const Body
             c.heading_rig = {};
             c.eyes = {};
             c.eyes_place = {};
+            c.head_origin = {};
             c.eyes_on = false;
             c.tilt_rig = {};
             c.trail.clear();
@@ -383,6 +392,12 @@ bool apply_camera(std::array<float, 16>& matrix, CameraWriter writer, const Body
         const float rig_elapsed = frame_end && c.rig_time > 0 ? static_cast<float>(now - c.rig_time) : 0.0f;
         if (frame_end) c.rig_time = now;
         const bool first = options.view_mode == 0;
+        const bool head_centred = first && options.head_centred;
+        if (c.head_mode != head_centred) {
+            c.head_mode = head_centred;
+            c.head_origin = {};
+            c.eyes_place = {};
+        }
 
         // The view's heading.
         //  - First person: through the skater's eyes (math::eyes_heading): the head's turn,
@@ -419,7 +434,12 @@ bool apply_camera(std::array<float, 16>& matrix, CameraWriter writer, const Body
             if (turn != 0 && c.outside) c.bail_heading = math::wrap(c.bail_heading + turn);
             else if (turn != 0 && look) c.heading = math::wrap(c.heading + turn);
         }
-        if (body && first) {
+        if (body && head_centred) {
+            // Locomotion turns the player rig; animated neck/head twists do not.
+            if (!look) c.heading = body->chest_heading;
+            c.eyes_on = false;
+            c.heading_rig.value = c.heading;
+        } else if (body && first) {
             const float eyes = math::eyes_heading(c.eyes, first_person::orientation(matrix), frame_end ? rig_elapsed : 0.0f);
             if (!look) {
                 // Taking over from the on-foot heading (or at the start), the difference fades over 0.4 s.
@@ -443,7 +463,11 @@ bool apply_camera(std::array<float, 16>& matrix, CameraWriter writer, const Body
         auto base = matrix;
         const bool body_near = body && std::abs(matrix[12] - body->origin[0]) < 3.0f &&
             std::abs(matrix[13] - body->origin[1]) < 3.0f && std::abs(matrix[14] - body->origin[2]) < 3.0f;
-        if (body_near) {
+        if (body_near && head_centred) {
+            const auto at = math::head_origin(c.head_origin, {matrix[12], matrix[13], matrix[14]},
+                body->origin, c.heading);
+            for (std::size_t i = 0; i < 3; ++i) base[12 + i] = at[i];
+        } else if (body_near) {
             // The view's position: the body origin plus the head's offset from it through one
             // continuous filter (math::eyes_position): bob smoothed, ollies and flips passed,
             // crouches scaled by Crouch.
@@ -499,6 +523,7 @@ bool apply_camera(std::array<float, 16>& matrix, CameraWriter writer, const Body
             // The game renders from between the eyes; the stereo shader makes both.
             const auto other = to_pose(views[view ^ 1u].pose);
             for (std::size_t i = 0; i < 3; ++i) eye.position[i] = (eye.position[i] + other.position[i]) * 0.5f;
+            if (head_centred) eye.orientation = head.orientation;
         }
         const auto aspect = s.image_aspect.load(std::memory_order_acquire);
         std::array<math::Tangents, 2> tangents{};
