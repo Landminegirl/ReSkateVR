@@ -16,7 +16,7 @@ asymmetric frustum. The submitted frusta match the mapped images. Invalid
 frusta keep the symmetric image and submission instead of submitting zero FOV.
 Camera records include the FOV correction sent to the game. The effect of that
 correction on the game's actual rendered view still needs headset validation.
-All 48 depth-search samples are retained. Alternate-eye, ReShade side-by-side
+Depth search supports 12-48 samples; v4 defaults to 24 for lower GPU work. Alternate-eye, ReShade side-by-side
 and the no-depth fallback retain their original projection paths.
 
 ## Checks and build
@@ -77,3 +77,30 @@ image; this does not extract it into a separately rendered headset layer.
 Regression tests cover torso motion, missing headings and real trajectory
 turns during pushes. Pitch distortion and frame pacing remain subject to
 headset testing and the single-view renderer's limits.
+
+## v4 HUD, L3 and reconstruction performance
+
+HUD area size (50-100%) composes native safe-area insets so HUD anchors move
+inward while text remains readable. 100% exactly restores the native insets.
+This uses a guarded native layout hook, described in HUD_LAYOUT.md, and never
+changes the scene projection. Widgets ignoring native safe areas may not move.
+
+Left-stick click switches VR view mode on release. Xbox XInput pads and Quest
+Touch controllers are supported; direct HID Sony L3 is not implemented. A
+both-sticks chord cancels view switching, retaining Touch recenter. Focus loss,
+menus, disabled VR or a disabled switch setting cancel a pending click; holding
+a stick across resume cannot accidentally switch views. Controller choices and
+view mode persist with the other VR settings.
+
+Default eye reconstruction dimensions are 75% of the source image and search
+quality is 24 samples. Both are adjustable, independently of scene FOV, IPD,
+depth strength or frame pairing. 100% / 48 restores v3 quality. This reduces
+reconstruction workload, not the cost of the base game's scene render. Hardware
+frame-rate gains remain unmeasured. Eye-chain resizing waits for both copy and
+stereo GPU work before destroying resources. Logs include eye dimensions and
+sample count so a headset test can compare actual rates.
+
+Checks cover click hold/release, chord cancellation, focus/menu interruption,
+native-area identity and inset math, eye dimensions, existing projection, head
+camera and launch behavior. Native hooks and HUD widget coverage still require
+physical game/headset validation.

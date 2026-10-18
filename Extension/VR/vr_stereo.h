@@ -18,6 +18,7 @@ struct StereoParams {
     // Holes the centre view never saw: background (farthest surface) or the near edge stretched.
     bool background_fill = true;
     float vignette = 0; // comfort vignette (0 none)
+    unsigned steps = 24;
     // Map each output eye UV into the symmetric centre-camera image.
     // Identity means the old symmetric projection (used for debugging).
     std::array<float, 2> u_scale{1.0f, 1.0f}, v_scale{1.0f, 1.0f};

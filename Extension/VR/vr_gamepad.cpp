@@ -124,6 +124,8 @@ PadPeek xinput_peek() noexcept {
                 continue;
             }
             if (std::abs(state.Gamepad.sThumbRX) > std::abs(peek.right_x)) peek.right_x = state.Gamepad.sThumbRX;
+            peek.left_click = peek.left_click || (state.Gamepad.wButtons & XINPUT_GAMEPAD_LEFT_THUMB) != 0;
+            peek.right_click = peek.right_click || (state.Gamepad.wButtons & XINPUT_GAMEPAD_RIGHT_THUMB) != 0;
             peek.trigger = std::max({peek.trigger, state.Gamepad.bLeftTrigger, state.Gamepad.bRightTrigger});
         }
         return peek;

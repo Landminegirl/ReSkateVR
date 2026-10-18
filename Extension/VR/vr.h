@@ -92,6 +92,12 @@ struct Settings {
     // 0 first person; 1 third person (the camera orbits behind the skater at
     // third_distance and third_height; the head is not hidden).
     int view_mode = 0;
+    bool stick_view_switch = true;
+    // Native safe-area layout: smaller moves HUD anchors inwards, preserving text size.
+    float hud_area = 1.0f;
+    // Eye reconstruction resolution and ray search quality, independent of scene FOV.
+    float eye_render_scale = 0.75f;
+    int stereo_steps = 24;
     float third_distance = 2.5f, third_height = 0.5f;
     // First person on foot: the view turns only with the headset (and stick turns), not with
     // the body, so the stick walks where you look. The game moves the skater relative to the
@@ -273,6 +279,8 @@ bool apply_camera(std::array<float, 16>& matrix, CameraWriter writer, const Body
 // Depth stereo: hooks D3D12 device creation (call at startup, before the game
 // creates its device) to find the scene depth buffer.
 void start_depth_probe() noexcept;
+void start_hud_layout(std::uintptr_t base) noexcept;
+bool hud_layout_available() noexcept;
 // Present thread: picks the scene depth for this image size.
 void depth_on_present(std::uint64_t width, std::uint32_t height) noexcept;
 // Copies the scene depth (previous frame) at each of its clears while enabled.
@@ -280,6 +288,7 @@ void set_depth_copy(bool enabled) noexcept;
 // A gamepad state the overlay's XInput hook merges into pad 0 (sticks -32768..32767,
 // XINPUT_GAMEPAD_* buttons, triggers 0..255).
 struct VirtualPad {
+    bool left_click = false, right_click = false;
     bool active = false;
     std::uint16_t buttons = 0;
     std::uint8_t left_trigger = 0, right_trigger = 0;
@@ -300,6 +309,7 @@ std::int16_t directinput_right_x() noexcept;
 struct PadPeek {
     std::int16_t right_x = 0;
     std::uint8_t trigger = 0; // the more pressed of the two
+    bool left_click = false, right_click = false;
 };
 PadPeek xinput_peek() noexcept;
 // First person shows the whole skater now (the flip & bail view, grabs).

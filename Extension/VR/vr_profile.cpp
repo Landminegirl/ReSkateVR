@@ -33,6 +33,10 @@ constexpr const char* frame_lag = "VR.FrameLag";
 constexpr const char* hide_body = "VR.HideBody";
 constexpr const char* hide_body_foot = "VR.HideBodyFoot";
 constexpr const char* view_mode = "VR.ViewMode";
+constexpr const char* stick_view_switch = "VR.StickViewSwitch";
+constexpr const char* hud_area = "VR.HudArea";
+constexpr const char* eye_render_scale = "VR.EyeRenderScale";
+constexpr const char* stereo_steps = "VR.StereoSteps";
 constexpr const char* stereo_mode = "VR.StereoMode";
 constexpr const char* depth_strength = "VR.DepthStrength";
 constexpr const char* lens_effects_off = "VR.LensEffectsOff";
@@ -103,6 +107,10 @@ const std::array fields{
     Field{.key = key::hide_body, .whole = &Settings::hide_body},
     Field{.key = key::hide_body_foot, .whole = &Settings::hide_body_foot},
     Field{.key = key::view_mode, .whole = &Settings::view_mode},
+    Field{.key = key::stick_view_switch, .flag = &Settings::stick_view_switch},
+    Field{.key = key::hud_area, .real = &Settings::hud_area},
+    Field{.key = key::eye_render_scale, .real = &Settings::eye_render_scale},
+    Field{.key = key::stereo_steps, .whole = &Settings::stereo_steps},
     Field{.key = key::stereo_mode, .whole = &Settings::stereo_mode},
     Field{.key = key::depth_strength, .real = &Settings::depth_strength},
     Field{.key = key::lens_effects_off, .flag = &Settings::lens_effects_off},

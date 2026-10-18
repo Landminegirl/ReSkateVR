@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdint>
 #include <limits>
 #include <numbers>
 #include <optional>
@@ -17,6 +18,32 @@ namespace dingosdk::vr::math {
 using first_person::Matrix;
 using first_person::Quat;
 using first_person::Vec3;
+
+// Release-triggered click allows the existing both-sticks recenter chord to cancel it.
+struct StickViewSwitch {
+    bool ready = false, held = false, candidate = false;
+    bool sample(bool active, bool left, bool right) noexcept {
+        if (!active) { ready = held = candidate = false; return false; }
+        if (!ready) { ready = true; held = left; candidate = false; return false; }
+        if (left && !held) candidate = !right;
+        if (right) candidate = false;
+        const bool toggle = !left && held && candidate;
+        held = left;
+        if (!left) candidate = false;
+        return toggle;
+    }
+};
+// Insets compose with the game's existing safe area; 100% is exactly unchanged.
+inline std::array<float, 4> hud_margins(const std::array<float, 4>& native, float area) {
+    area = std::clamp(area, 0.5f, 1.0f);
+    if (area == 1.0f) return native;
+    auto result = native;
+    for (auto& edge : result) edge = 0.5f - (0.5f - edge) * area;
+    return result;
+}
+inline std::uint32_t eye_extent(std::uint32_t source, float scale) {
+    return std::max(1u, static_cast<std::uint32_t>(std::lround(source * std::clamp(scale, 0.5f, 1.0f))));
+}
 
 struct Pose {
     Quat orientation{0, 0, 0, 1};

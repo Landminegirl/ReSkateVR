@@ -147,6 +147,10 @@ void register_vr_commands(Commands& registry) {
         0.0f, Limits::depth_strength_max);
     real(registry, "vr.tilt_filter", "Seconds of pitch/roll wobble filtering (Level horizon off)",
         &Settings::tilt_filter, 0.0f, Limits::tilt_filter_max);
+    real(registry, "vr.hud_area", "HUD safe area (0.5 centred, 1 native)", &Settings::hud_area, 0.5f, 1.0f);
+    flag(registry, "vr.stick_view_switch", "Left stick click switches first/third person", &Settings::stick_view_switch);
+    real(registry, "vr.eye_render_scale", "Eye reconstruction resolution (0.5-1)", &Settings::eye_render_scale, 0.5f, 1.0f);
+    whole(registry, "vr.stereo_steps", "Depth reconstruction search quality (12-48)", &Settings::stereo_steps, 12, 48);
     whole(registry, "vr.view", "0 first person, 1 third person", &Settings::view_mode, 0, Limits::view_mode_max);
     real(registry, "vr.vignette", "Comfort vignette: edges darken while the view turns without your head (0 off, 1 strong)",
         &Settings::comfort_vignette, 0.0f, Limits::comfort_vignette_max);

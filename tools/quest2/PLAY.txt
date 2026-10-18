@@ -1,4 +1,4 @@
-RESKATE VR - QUEST 2 CAMERA / LAUNCHER v3 (EXPERIMENTAL)
+RESKATE VR - QUEST 2 HUD / CONTROLS v4 (EXPERIMENTAL)
 
 INSTALL
 1. Close skate. and ReSkateLauncher. Back up the files from your current build.
@@ -11,16 +11,17 @@ INSTALL
 No PowerShell, Python, compiler or scripts are needed to play.
 
 WHAT CHANGED
-- Separate PLAY and LAUNCH VR buttons; standard play keeps your saved display options.
-- Push animations no longer supply the player rig heading; it follows the trajectory root.
-- Tick and render camera updates use the same raw head pose and player frame in VR.
-- ADDONS > VR > Show game HUD toggles scores, objectives and indicators.
-- The camera starts at the avatar's eye origin instead of behind and to one side.
-- A rigid player eye origin replaces following animated head bob and neck turns.
-- Physical headset rotation and leaning are applied directly, without animation filters.
-- Extra future head-pose prediction is removed; image pairing is kept as you set it.
-- Automatic flip/bail/grab camera changes are off in the starting camera setup.
-- The update keeps your existing depth, FOV calibration and eye-pairing settings.
+- PLAY launches the standard game; LAUNCH VR starts the headset session.
+- ADDONS > VR > HUD area size brings the game HUD towards the centre.
+  Try 70% first. This keeps text readable; some widgets may ignore safe areas.
+- Click and release the LEFT stick to switch first/third person (Xbox or Touch).
+  Switching is paused in menus and while the headset is unfocused. The switch
+  can be disabled in ADDONS > VR. Both Touch sticks held still recenter.
+- VR eye resolution defaults to 75%, stereo search quality to 24 samples.
+  These reduce reconstruction work, with a sharpness / edge-quality tradeoff.
+  Raise them to 100% / 48 to restore the previous reconstruction quality.
+- Native HUD settings, depth strength, eye alignment, FOV and pairing stay intact.
+- The v3 rigid head camera and push animation fix are retained.
 
 New camera defaults are applied once automatically after your profile loads.
 Later changes are saved normally. Head-centred tracking is a toggle in ADDONS > VR.
@@ -36,9 +37,11 @@ starting point; the game can replace the launcher's requested square resolution
 when it loads saved display settings. Raise resolution once motion is stable.
 
 TEST STATUS
-Native rotation/lean, push-heading, preset-migration and launch-mode checks pass.
+Native rotation/lean, push-heading, preset-migration, launch-mode, HUD layout
+and stick-switch gesture checks pass.
 The Windows DLL and launcher compile; all three stereo shaders compile.
 This revision has not yet been tested on a physical headset.
+The HUD slider changes native safe-area anchors, preserving text size.
 The HUD is the game HUD included in the reconstructed image; edge placement
 and depth can retain reconstruction artifacts. It is not a separate floating panel. If turning,
 pitch or roll still causes stretching or double vision, stop and report it.

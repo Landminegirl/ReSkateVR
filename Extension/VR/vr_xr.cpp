@@ -69,6 +69,7 @@ struct Runtime {
     math::Anchor screen_anchor;
     std::uint64_t screen_recenter = 0;
     bool key_down = false;
+    math::StickViewSwitch view_switch;
     double stats_time = 0;
     std::uint64_t stats_presents = 0, stats_camera = 0, presents = 0;
     // New camera frames found per present while the VR camera is active:
@@ -444,7 +445,7 @@ bool ensure_chain(Chain& chain, std::uint32_t width, std::uint32_t height, std::
     auto& x = shared().xr;
     if (chain.handle && chain.width == width && chain.height == height) return true;
     if (chain.handle) {
-        if (!r.blitter.wait_idle(2000)) { error = "The GPU did not finish copying to the headset."; return false; }
+        if (!r.blitter.wait_idle(2000) || !r.stereo.wait_idle(2000)) { error = "The GPU did not finish copying to the headset."; return false; }
         destroy_chain(chain);
     }
     XrSwapchainCreateInfo create{XR_TYPE_SWAPCHAIN_CREATE_INFO};
@@ -571,12 +572,12 @@ void publish_rates(double now) {
         }
         log_info(std::format("stats: state {}, headset {:.0f} Hz, presents {:.1f}/s, camera frames {:.1f}/s, "
             "pairing none/one/more {}/{}/{}, eye images {}, repeats {}, frames {}, {}, image {}x{} format {}, render FOV {:.1f}, "
-            "frame lag {}, camera thread {}, present thread {}",
+            "frame lag {}, camera thread {}, present thread {}, eye reconstruction {}x{} / {} samples",
             snapshot.state, period > 0 ? 1e9 / static_cast<double>(period) : 0.0, present_hz, camera_hz,
             r.pairing[0], r.pairing[1], r.pairing[2], snapshot.eye_images, snapshot.repeated_images, snapshot.frames_submitted,
             camera_active(now) ? "VR camera" : snapshot.theater_active ? "flat screen" : "idle",
             snapshot.image_width, snapshot.image_height, r.image_format, fov, current_settings().frame_lag, camera_thread,
-            GetCurrentThreadId()));
+            GetCurrentThreadId(), r.eyes[0].width, r.eyes[0].height, current_settings().stereo_steps));
         r.pairing = {};
     }
     update_status([&](Status& st) {
@@ -833,6 +834,7 @@ void on_present(IDXGISwapChain3* chain, ID3D12CommandQueue* queue) noexcept {
                     params.max_shift = std::min(0.04f, params.scale * 0.15f);
                     params.background_fill = options.gap_fill == 1;
                     params.vignette = eye_vignette();
+                    params.steps = static_cast<unsigned>(options.stereo_steps);
                     // Match pixel rays to the Quest/OpenXR runtime eye projections.
                     // The native camera rendered a centred, symmetric frustum;
                     // the shader resamples it into each tracked eye frustum.
@@ -846,7 +848,9 @@ void on_present(IDXGISwapChain3* chain, ID3D12CommandQueue* queue) noexcept {
                             mapped[e] = true;
                         }
                     }
-                    if (ensure_chain(r.eyes[0], desc.Width, desc.Height, error) && ensure_chain(r.eyes[1], desc.Width, desc.Height, error) &&
+                    const auto eye_width = math::eye_extent(desc.Width, options.eye_render_scale);
+                    const auto eye_height = math::eye_extent(desc.Height, options.eye_render_scale);
+                    if (ensure_chain(r.eyes[0], eye_width, eye_height, error) && ensure_chain(r.eyes[1], eye_width, eye_height, error) &&
                         render_stereo_into({&r.eyes[0], &r.eyes[1]}, params, error)) {
                         for (std::uint32_t v = 0; v < 2; ++v) {
                             r.eye_ready[v] = true;
@@ -983,6 +987,17 @@ void after_present() noexcept {
         }
         handle_events();
         if (r.instance && r.running) input_sync(r.session, r.state == XR_SESSION_STATE_FOCUSED);
+        const auto options = current_settings();
+        const bool can_switch = r.running && r.state == XR_SESSION_STATE_FOCUSED && options.enabled && options.stick_view_switch &&
+            camera_active(seconds_now()) && !s.ui_open.load(std::memory_order_acquire) && !s.game_menu.load(std::memory_order_acquire);
+        const auto physical = can_switch ? xinput_peek() : PadPeek{};
+        const auto touch = can_switch ? controller_pad() : VirtualPad{};
+        if (r.view_switch.sample(can_switch, physical.left_click || touch.left_click, physical.right_click || touch.right_click)) {
+            auto changed = current_settings();
+            changed.view_mode = changed.view_mode == 0 ? 1 : 0;
+            (void)set_settings(changed);
+            log_info(changed.view_mode == 0 ? "First person (left stick click)." : "Third person (left stick click).");
+        }
         if (!r.instance || !r.running || r.frame_begun) return;
         XrFrameWaitInfo wait{XR_TYPE_FRAME_WAIT_INFO};
         r.frame = {XR_TYPE_FRAME_STATE};

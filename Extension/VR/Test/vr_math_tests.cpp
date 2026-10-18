@@ -42,6 +42,32 @@ Quat pitch(float radians) { return {std::sin(radians / 2), 0, 0, std::cos(radian
 }
 
 int main() {
+    {
+        StickViewSwitch click;
+        CHECK(!click.sample(true, false, false));
+        CHECK(!click.sample(true, true, false));
+        CHECK(!click.sample(true, true, false));
+        CHECK(click.sample(true, false, false));
+        CHECK(!click.sample(true, false, false));
+        CHECK(!click.sample(true, true, false));
+        CHECK(!click.sample(true, true, true));
+        CHECK(!click.sample(true, false, false)); // recenter chord cancels switch
+        CHECK(!click.sample(true, true, false));
+        CHECK(!click.sample(false, true, false)); // menu/focus loss cancels switch
+        CHECK(!click.sample(true, true, false));
+        CHECK(!click.sample(true, false, false));
+        CHECK(!click.sample(true, true, false));
+        CHECK(click.sample(true, false, false));
+        const std::array<float, 4> native{.02f, .03f, .04f, .05f};
+        CHECK(hud_margins(native, 1) == native);
+        const auto inset = hud_margins(native, .6f);
+        CHECK(near(inset[0], .212f) && near(inset[2], .224f));
+        CHECK(inset[0] > native[0] && inset[1] > native[1]);
+        CHECK(eye_extent(2048, .75f) == 1536);
+        CHECK(eye_extent(1920, 1) == 1920);
+        CHECK(eye_extent(1, .5f) == 1);
+    }
+
     // wrap keeps angles in (-pi, pi].
     CHECK(near(wrap(0), 0));
     CHECK(near(wrap(3 * pi), pi));

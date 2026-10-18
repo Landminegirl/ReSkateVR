@@ -17,7 +17,7 @@ Texture2D<float> depth : register(t1);
 SamplerState linear_clamp : register(s0);
 cbuffer Constants : register(b0) {
     uint mode; float side; float scale; float max_shift; float vignette;
-    float u_scale; float v_scale; float u_bias; float v_bias;
+    float u_scale; float v_scale; float u_bias; float v_bias; uint search_steps;
 };
 struct Vertex { float4 position : SV_Position; float2 uv : TEXCOORD0; };
 Vertex vs_main(uint id : SV_VertexID) {
@@ -59,7 +59,7 @@ float ps_dilate(Vertex v) : SV_Target {
             nearest = max(nearest, depth.Load(int3(clamp(p + int2(dx, dy), int2(0, 0), int2(size) - 1), 0)));
     return nearest;
 }
-static const int steps = 48;
+// Ray search quality is adjustable; image projection and separation stay unchanged.
 // Comfort vignette: darkens towards the edges by `amount` (0 none, 1 a narrow window). The
 // image is rendered wider than the lenses show, so it starts well inside the image edge.
 float3 comfort(float3 c, float2 uv, float amount) {
@@ -78,6 +78,7 @@ float4 ps_main(Vertex v) : SV_Target {
     if (scale > 0 && max_shift > 0) {
         float2 size;
         depth.GetDimensions(size.x, size.y);
+        int steps = clamp(int(search_steps), 12, 48);
         float step_size = max_shift / steps;
         float previous_t = max_shift, previous_f = shift_at(float2(scene_uv.x - side * max_shift, scene_uv.y), size) - max_shift;
         float far_shift = previous_f + max_shift, far_x = scene_uv.x - side * max_shift;
@@ -146,7 +147,7 @@ bool DepthStereo::create(ID3D12Device* device, std::string& error) {
     parameters[0].DescriptorTable = {1, &range};
     parameters[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
     parameters[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
-    parameters[1].Constants = {0, 0, 9};
+    parameters[1].Constants = {0, 0, 10};
     parameters[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
     D3D12_STATIC_SAMPLER_DESC sampler{};
     sampler.Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
@@ -420,7 +421,7 @@ bool DepthStereo::render(ID3D12CommandQueue* queue, const std::array<ID3D12Resou
         device_->CreateRenderTargetView(targets[eye], &target_view, rtv);
         // Left eye (+1): near points move right in its image; right eye (-1): left.
         const float side = eye == 0 ? 1.0f : -1.0f;
-        std::array<UINT, 9> constants{mode, 0, 0, 0, 0, 0, 0, 0, 0};
+        std::array<UINT, 10> constants{mode, 0, 0, 0, 0, 0, 0, 0, 0, std::clamp(params.steps, 12u, 48u)};
         std::memcpy(&constants[1], &side, sizeof(float));
         std::memcpy(&constants[2], &params.scale, sizeof(float));
         std::memcpy(&constants[3], &params.max_shift, sizeof(float));

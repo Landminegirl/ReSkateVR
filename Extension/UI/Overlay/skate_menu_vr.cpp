@@ -54,6 +54,17 @@ void vr_controls(SkateMenu& menu, const Model& model, const CallbacksV3& callbac
     if (toggle_row(menu, "Show game HUD", "Show the game's scores, objectives and indicators while riding.", game_hud))
         debug_request(menu, callbacks, {DebugAction::set_game_ui_hidden, !game_hud});
     ImGui::EndDisabled();
+    ImGui::BeginDisabled(!vr::hud_layout_available());
+    slider(menu, "HUD area size", "Lower brings scores, objectives and indicators towards the centre; text stays readable.",
+        options.hud_area * 100.0f, 50.0f, 100.0f, "%.0f%%", [&](float v) { options.hud_area = v / 100.0f; changed = true; });
+    ImGui::EndDisabled();
+    if (!vr::hud_layout_available()) note("HUD layout control is unavailable for this game build.");
+    if (toggle_row(menu, "Left stick switches view", "Click and release L3 to swap first/third person. Both Touch sticks held still recenter.",
+            options.stick_view_switch)) changed = true;
+    slider(menu, "VR eye resolution", "Lower reduces VR reconstruction work and sharpness without changing the field of view.",
+        options.eye_render_scale * 100.0f, 50.0f, 100.0f, "%.0f%%", [&](float v) { options.eye_render_scale = v / 100.0f; changed = true; });
+    slider(menu, "Stereo search quality", "Lower uses fewer depth samples for speed; raise if object edges break up.",
+        static_cast<float>(options.stereo_steps), 12, 48, "%.0f", [&](float v) { options.stereo_steps = static_cast<int>(v); changed = true; });
     if (primary_button(menu, "Recenter view", vr_status.running)) vr::recenter();
     if (primary_button(menu, "Recommended settings", true)) {
         // Every VR value back to the tested defaults; VR stays on or off.
@@ -73,7 +84,7 @@ void vr_controls(SkateMenu& menu, const Model& model, const CallbacksV3& callbac
          "Use Depth strength 0 to diagnose eye alignment without stereo separation.");
     if (!model.debug.first_person && !options.auto_first_person)
         note("Turn on First person in the CAMERA tab to see the world in 3D. Until then the game shows on a flat screen.");
-    note("For a sharp, smooth image: windowed 2880x2880 in the launcher; V-Sync, frame generation and motion blur off.");
+    note("For smoother turns, use 72 Hz in Link and lower game graphics until FPS matches it. Keep V-Sync, frame generation and motion blur off.");
     end_card();
 
     // ---- Presets.

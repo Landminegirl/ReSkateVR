@@ -239,6 +239,8 @@ void input_sync(XrSession session, bool focused) noexcept {
         if (pressed(session, in.y)) buttons |= XINPUT_GAMEPAD_B;
         // Both stick clicks held a second recentre the view (and are not passed on).
         const bool left_click = pressed(session, in.stick_click, left), right_click = pressed(session, in.stick_click, right);
+        pad.left_click = left_click;
+        pad.right_click = right_click;
         if (left_click && right_click) {
             if (in.recenter_since == 0) in.recenter_since = now;
             if (!in.recentred && now - in.recenter_since > 1.0) {
@@ -249,7 +251,7 @@ void input_sync(XrSession session, bool focused) noexcept {
         } else {
             in.recenter_since = 0;
             in.recentred = false;
-            if (left_click) buttons |= XINPUT_GAMEPAD_LEFT_THUMB;
+            if (left_click && !current_settings().stick_view_switch) buttons |= XINPUT_GAMEPAD_LEFT_THUMB;
             if (right_click) buttons |= XINPUT_GAMEPAD_RIGHT_THUMB;
         }
         // Menu: a short press taps Start (on release); held past 0.6 s it holds Back.
