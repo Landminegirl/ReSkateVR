@@ -30,3 +30,5 @@ This build preserves the original depth-search quality. It reconstructs
 stereo from one rendered view, so some edge artifacts remain possible.
 Built-in Spotify Connect is omitted. Binary auto-update is disabled for this
 test build. Matching source and licenses accompany this build.
+
+Matching source: https://github.com/Landminegirl/ReSkateVR/tree/quest2-eye-alignment
