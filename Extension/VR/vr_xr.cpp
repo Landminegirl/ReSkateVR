@@ -833,6 +833,19 @@ void on_present(IDXGISwapChain3* chain, ID3D12CommandQueue* queue) noexcept {
                     params.max_shift = std::min(0.04f, params.scale * 0.15f);
                     params.background_fill = options.gap_fill == 1;
                     params.vignette = eye_vignette();
+                    // Match pixel rays to the Quest/OpenXR runtime eye projections.
+                    // The native camera rendered a centred, symmetric frustum;
+                    // the shader resamples it into each tracked eye frustum.
+                    std::array<bool, 2> mapped{};
+                    for (std::size_t e = 0; e < 2; ++e) {
+                        if (const auto uv = math::eye_uv_mapping(record.fov, record.headset_fov[e])) {
+                            params.u_scale[e] = uv->u_scale;
+                            params.v_scale[e] = uv->v_scale;
+                            params.u_bias[e] = uv->u_bias;
+                            params.v_bias[e] = uv->v_bias;
+                            mapped[e] = true;
+                        }
+                    }
                     if (ensure_chain(r.eyes[0], desc.Width, desc.Height, error) && ensure_chain(r.eyes[1], desc.Width, desc.Height, error) &&
                         render_stereo_into({&r.eyes[0], &r.eyes[1]}, params, error)) {
                         for (std::uint32_t v = 0; v < 2; ++v) {
@@ -840,6 +853,9 @@ void on_present(IDXGISwapChain3* chain, ID3D12CommandQueue* queue) noexcept {
                             r.eye_records[v] = record;
                             r.eye_records[v].view = v;
                             r.eye_records[v].pose = v ? record.right : record.left;
+                            // The depth pass has remapped the image to the actual
+                            // headset frustum. Other stereo paths stay symmetric.
+                            if (mapped[v]) r.eye_records[v].fov = record.headset_fov[v];
                         }
                         update_status([](Status& st) { st.eye_images += 2; });
                     } else failed = true;

@@ -58,6 +58,14 @@ void vr_controls(SkateMenu& menu, const Model& model) {
         options = recommended;
         changed = true;
     }
+    // Quest 2: start with a modest source resolution (2048 square), a
+    // conservative disparity and enough FOV margin for eye reprojection.
+    if (primary_button(menu, "Quest 2 balanced", true)) {
+        options = vr::quest2_balanced(options);
+        changed = true;
+    }
+    note("Quest 2: try 2048x2048 windowed, disable frame generation and V-Sync. "
+         "Use Depth strength 0 to diagnose eye alignment without stereo separation.");
     if (!model.debug.first_person && !options.auto_first_person)
         note("Turn on First person in the CAMERA tab to see the world in 3D. Until then the game shows on a flat screen.");
     note("For a sharp, smooth image: windowed 2880x2880 in the launcher; V-Sync, frame generation and motion blur off.");

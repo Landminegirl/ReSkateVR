@@ -664,7 +664,13 @@ bool apply_camera(std::array<float, 16>& matrix, CameraWriter writer, const Body
         if (frame_end) {
             {
                 std::lock_guard records(s.records_mutex);
-                EyeRecord record{s.next_sequence++, view, eye, math::layer_angles(tangent, aspect)};
+                // Record the frustum the game actually receives.
+                // Previously the eye record used the uncorrected FOV.
+                EyeRecord record{s.next_sequence++, view, eye,
+                    math::layer_angles(tangent * options.fov_correction, aspect)};
+                for (std::size_t i = 0; i < 2; ++i)
+                    record.headset_fov[i] = {views[i].fov.angleLeft, views[i].fov.angleRight,
+                        views[i].fov.angleUp, views[i].fov.angleDown};
                 if (side_by_side) {
                     record.both = true;
                     record.left = to_pose(views[0].pose);

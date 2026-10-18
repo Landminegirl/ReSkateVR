@@ -188,8 +188,21 @@ void load() noexcept {
         // Older builds offered choices that are gone; keep the rest.
         clamp_choices(value);
         // Out-of-range saves keep the defaults rather than half-applying.
-        (void)set_settings(value);
-        (void)take_settings_changed(); // Nothing new to save.
+        wchar_t launch[2]{};
+        const bool start_vr = GetEnvironmentVariableW(L"RESKATE_VR_LAUNCH", launch, 2) == 1 && launch[0] == L'1';
+        const bool first_quest2_launch = start_vr &&
+            !profile_runtime::local_preference("VR.Quest2Setup").value_or(false);
+        if (first_quest2_launch) value = quest2_balanced(value);
+        if (start_vr) value.enabled = true;
+        if (set_settings(value) && first_quest2_launch) {
+            // Migrate old VR settings once; preserve the player's later adjustments.
+            std::vector<std::pair<std::string, Json>> values;
+            const auto saved_values = to_json(value);
+            for (const auto& field : fields) values.emplace_back(field.key, saved_values[field.key]);
+            values.emplace_back("VR.Quest2Setup", Json(true));
+            profile_runtime::set_local_values(values);
+        }
+        (void)take_settings_changed(); // The launch choice itself is session-only.
 
         // Saved presets: a JSON list of {name, settings}, stored as text.
         std::vector<Preset> saved;

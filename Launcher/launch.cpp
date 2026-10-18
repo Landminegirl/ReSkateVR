@@ -808,6 +808,7 @@ DWORD start_game(const Session& session, const launcher::LaunchOptions& options,
     set_environment(L"RESKATE_LOOSE_FILES", loose_files ? L"1" : L"0");
     set_environment(L"RESKATE_LOG_CONSOLE", options.window_console ? L"1" : L"0");
     set_environment(L"RESKATE_LOG_LEVEL", widen(options.log_level).c_str());
+    set_environment(L"RESKATE_VR_LAUNCH", options.vr ? L"1" : L"0");
     set_environment(L"RESKATE_FORCE_WINDOWED", options.force_windowed ? L"1" : L"0");
     set_environment(L"RESKATE_WINDOW_WIDTH", options.force_windowed ? std::to_wstring(options.width).c_str() : nullptr);
     set_environment(L"RESKATE_WINDOW_HEIGHT", options.force_windowed ? std::to_wstring(options.height).c_str() : nullptr);

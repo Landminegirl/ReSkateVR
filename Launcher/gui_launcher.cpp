@@ -520,6 +520,8 @@ bool Launcher::run_mod_merge() {
 }
 
 void Launcher::run_play() {
+    if (!fs::is_regular_file(session_.paths.directory / L"openxr_loader.dll"))
+        throw std::runtime_error("The VR loader is missing. Copy all files from the Quest 2 VR download beside ReSkateLauncher.exe.");
     // The official mods first (official_mods.h): the merge takes them in.
     if (!official_mods::wait(std::chrono::milliseconds(0))) {
         set(Phase::merging, "Official mods", "Finishing the official mods being installed", -1.0f);
@@ -531,6 +533,9 @@ void Launcher::run_play() {
     set(Phase::launching, "Starting Skate");
     save();
     auto options = launch_options(settings_);
+    options.vr = true;
+    options.force_windowed = true;
+    options.width = options.height = 2048;
     // The launcher's own command line can request offline mode too.
     if (std::find(arguments_.begin(), arguments_.end(), L"-offline") != arguments_.end() ||
         std::find(arguments_.begin(), arguments_.end(), L"--offline") != arguments_.end())

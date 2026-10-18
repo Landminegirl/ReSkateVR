@@ -464,7 +464,7 @@ void frame(Launcher& launcher, const Fonts& fonts, HWND window, Ui& ui, ModsPane
     const ImVec2 mods_size(column, S(116));
     const ImVec2 mods_position(primary.x, primary.y - S(14) - mods_size.y);
     const ImVec2 settings(primary.x, mods_position.y - S(14) - S(84));
-    const char* label = "PLAY";
+    const char* label = "LAUNCH VR";
     std::string detail;
     bool enabled = !launcher.busy();
     bool secondary = false;
@@ -479,14 +479,10 @@ void frame(Launcher& launcher, const Fonts& fonts, HWND window, Ui& ui, ModsPane
         detail = state.progress >= 0 ? std::format("Downloading  {:.0f}%", state.progress * 100) : "Downloading";
         break;
     case Phase::merging: label = "MODS"; enabled = false; detail = "Merging your mods before Skate starts"; break;
-    case Phase::mods_broken: label = "PLAY"; enabled = false; detail = "Waiting on an answer about your mods"; break;
+    case Phase::mods_broken: label = "LAUNCH VR"; enabled = false; detail = "Waiting on an answer about your mods"; break;
     case Phase::ready:
-        label = "PLAY";
-        // Release builds install the configured runtime before PLAY appears.
-        detail = !state.config ? std::string("Offline")
-               : !update::binary_updates_enabled() ? std::string("ReSkate development build")
-               : state.config->runtime.version.empty() ? std::string("ReSkate")
-               : "ReSkate " + state.config->runtime.version;
+        label = "LAUNCH VR";
+        detail = "Quest 2 / OpenXR - connect Link, then launch";
         break;
     case Phase::launching: label = "LAUNCHING"; enabled = false; break;
     case Phase::failed: label = "RETRY"; break;

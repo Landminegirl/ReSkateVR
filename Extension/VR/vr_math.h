@@ -238,6 +238,21 @@ struct Angles {
     float left = 0, right = 0, up = 0, down = 0;
 };
 
+// Affine UV transform from an OpenXR eye into a symmetric source image.
+struct EyeUvMapping {
+    float u_scale = 1, v_scale = 1, u_bias = 0, v_bias = 0;
+};
+inline std::optional<EyeUvMapping> eye_uv_mapping(const Angles& source, const Angles& eye) {
+    const float h = std::tan(source.right), v = std::tan(source.up);
+    const float l = std::tan(eye.left), r = std::tan(eye.right);
+    const float u = std::tan(eye.up), d = std::tan(eye.down);
+    if (!std::isfinite(h) || !std::isfinite(v) || h <= 0.01f || v <= 0.01f ||
+        !std::isfinite(l) || !std::isfinite(r) || !std::isfinite(u) || !std::isfinite(d) ||
+        l >= r || d >= u) return std::nullopt;
+    return EyeUvMapping{(r - l) / (2 * h), (u - d) / (2 * v),
+                        0.5f + l / (2 * h), 0.5f - u / (2 * v)};
+}
+
 // The frustum actually rendered.
 inline Angles layer_angles(float tangent, float aspect) {
     const float h = std::atan(tangent * aspect), v = std::atan(tangent);

@@ -22,7 +22,8 @@ analysis/raw/**/*.ebx
 analysis/raw/**/*.res
 
 # Optional developer utilities stay local. CMake is self-contained.
-/tools/
+/tools/*
+!/tools/quest2/
 /tests/
 
 # Local research and extended documentation are not shipped.

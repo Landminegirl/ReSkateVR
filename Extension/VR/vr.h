@@ -135,6 +135,20 @@ struct Settings {
     int recenter_key = 0x77;
 };
 
+// Starting values shared by the launcher bootstrap and the in-game preset.
+inline Settings quest2_balanced(Settings value) noexcept {
+    value.enabled = true;
+    value.auto_first_person = true;
+    value.stereo_mode = 2;
+    value.depth_strength = 0.35f;
+    value.world_scale = 1.0f;
+    value.fov_scale = 1.10f;
+    value.edge_widening = 1;
+    value.gap_fill = 1;
+    value.lens_effects_off = true;
+    return value;
+}
+
 struct Limits {
     static constexpr float turn_smoothing_max = 2.0f;
     static constexpr float world_scale_min = 0.25f, world_scale_max = 4.0f;

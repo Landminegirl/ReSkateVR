@@ -60,6 +60,9 @@ struct EyeRecord {
     std::uint32_t view = 0;
     math::Pose pose; // tracking space (LOCAL), not recentered
     math::Angles fov;
+    // Headset-specific asymmetric eye frusta. The game still renders a
+    // symmetric centre-camera image for the depth reconstruction pass.
+    std::array<math::Angles, 2> headset_fov{};
     // Side-by-side input: one image holds both eyes, rendered from between them.
     bool both = false;
     math::Pose left, right;

@@ -2,6 +2,7 @@
 //   cl /std:c++20 /EHsc /I <repo> Extension/VR/Test/vr_math_tests.cpp
 //   g++ -std=c++20 -I <repo> Extension/VR/Test/vr_math_tests.cpp
 #include "Extension/VR/vr_math.h"
+#include "Extension/VR/vr.h"
 #include <cstdio>
 #include <cstdlib>
 
@@ -211,6 +212,46 @@ int main() {
         CHECK(near(tall, 2 * std::tan(0.95f)));
         CHECK(near(native_fov_degrees(tall, 0.5f, false), 2 * 0.95f * 180 / pi, 1e-2f));
         CHECK(near(render_tangent({left, right}, 1.0f, 1.1f), 1.1f * std::tan(0.95f)));
+    }
+    // The one-click setup enables VR and keeps unrelated player calibration.
+    {
+        dingosdk::vr::Settings saved;
+        saved.fov_correction = 1.17f;
+        saved.frame_lag = 3;
+        const auto balanced = dingosdk::vr::quest2_balanced(saved);
+        CHECK(balanced.enabled && balanced.auto_first_person);
+        CHECK(balanced.stereo_mode == 2 && near(balanced.depth_strength, 0.35f));
+        CHECK(near(balanced.world_scale, 1.0f) && near(balanced.fov_scale, 1.10f));
+        CHECK(balanced.edge_widening == 1 && balanced.gap_fill == 1 && balanced.lens_effects_off);
+        CHECK(near(balanced.fov_correction, 1.17f) && balanced.frame_lag == 3);
+    }
+    // Test the production UV mapping: rays agree even when principal points differ.
+    {
+        const Angles source{-1.05f, 1.05f, 0.99f, -0.99f};
+        const Angles eyes[]{{-0.89f, 0.68f, 0.79f, -0.69f}, { -0.68f, 0.89f, 0.79f, -0.69f }};
+        for (const auto& eye : eyes) {
+            const auto uv = eye_uv_mapping(source, eye);
+            CHECK(uv.has_value());
+            if (!uv) continue;
+            for (float x : {0.0f, 0.2f, 0.5f, 1.0f})
+                for (float y : {0.0f, 0.5f, 0.9f, 1.0f}) {
+                    const float sx = x * uv->u_scale + uv->u_bias;
+                    const float sy = y * uv->v_scale + uv->v_bias;
+                    CHECK(near((sx - 0.5f) * 2 * std::tan(source.right),
+                        (1 - x) * std::tan(eye.left) + x * std::tan(eye.right)));
+                    CHECK(near((0.5f - sy) * 2 * std::tan(source.up),
+                        (1 - y) * std::tan(eye.up) + y * std::tan(eye.down)));
+                    CHECK(sx >= 0 && sx <= 1 && sy >= 0 && sy <= 1);
+                }
+        }
+        const auto identity = eye_uv_mapping(source, source);
+        CHECK(identity && near(identity->u_scale, 1) && near(identity->v_scale, 1));
+        CHECK(identity && near(identity->u_bias, 0) && near(identity->v_bias, 0));
+        CHECK(!eye_uv_mapping(Angles{}, eyes[0]));
+        CHECK(!eye_uv_mapping(source, Angles{}));
+        CHECK(!eye_uv_mapping(source, Angles{0.8f, -0.8f, 0.7f, -0.7f}));
+        CHECK(!eye_uv_mapping(source, Angles{-0.8f, 0.8f, 0.0f, 0.0f}));
+        CHECK(!eye_uv_mapping(source, Angles{NAN, 0.8f, 0.7f, -0.7f}));
     }
     if (failures) {
         std::printf("%d check(s) failed\n", failures);
