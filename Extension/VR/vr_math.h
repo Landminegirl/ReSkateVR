@@ -78,6 +78,15 @@ inline std::array<float, 4> hud_margins(const std::array<float, 4>& native, floa
     for (auto& edge : result) edge = 0.5f - (0.5f - edge) * area;
     return result;
 }
+// Wheel notches per frame: dead zone removes stick drift; cap stalled-frame jumps.
+inline float menu_wheel(float stick_y, float elapsed) {
+    if (!std::isfinite(stick_y) || !std::isfinite(elapsed)) return 0;
+    const float magnitude = std::clamp((std::abs(stick_y) - .25f) / .75f, 0.0f, 1.0f);
+    return std::copysign(magnitude, stick_y) * 6.0f * std::clamp(elapsed, 0.0f, .05f);
+}
+inline bool panel_uv_valid(float u, float v) {
+    return std::isfinite(u) && std::isfinite(v) && u >= 0 && u <= 1 && v >= 0 && v <= 1;
+}
 inline std::uint32_t eye_extent(std::uint32_t source, float scale) {
     return std::max(1u, static_cast<std::uint32_t>(std::lround(source * std::clamp(scale, 0.5f, 1.0f))));
 }

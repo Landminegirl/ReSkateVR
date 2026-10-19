@@ -255,7 +255,7 @@ void voice_controls(SkateMenu &menu, const MultiplayerModel &mp) {
         warn("Assign a key, controller combo or VR Voice talk button, or turn on Open microphone.");
     if (vr_options.enabled && !value.open_mic)
         note(vr_options.voice_toggle ? "VR: Toggle to talk is selected in Addons > VR. Press your talk binding again to stop."
-                                    : "VR: Hold to talk is selected in Addons > VR. Quest Voice talk buttons are set there.");
+                                    : "VR: Hold to talk is selected in Addons > VR. VR controller Voice talk buttons are set there.");
     ImGui::EndDisabled();
     ImGui::Dummy(ImVec2(0, px(2)));
 

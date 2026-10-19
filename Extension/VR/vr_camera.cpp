@@ -79,6 +79,12 @@ bool set_settings(const Settings& value) noexcept {
     return true;
 }
 
+bool headset_pacing_active() noexcept {
+    const auto& s = detail::shared();
+    const auto options = detail::current_settings();
+    return s.tracking.load(std::memory_order_acquire) && options.enabled && options.headset_pacing;
+}
+
 bool take_settings_changed() noexcept { return detail::shared().settings_changed.exchange(false); }
 
 void set_ui_open(bool open) noexcept { detail::shared().ui_open.store(open, std::memory_order_release); }
@@ -552,7 +558,9 @@ bool apply_camera(std::array<float, 16>& matrix, CameraWriter writer, const Body
         for (std::size_t i = 0; i < 2; ++i)
             tangents[i] = math::tangents_from_angles(views[i].fov.angleLeft, views[i].fov.angleRight, views[i].fov.angleUp, views[i].fov.angleDown);
         const float tangent = math::render_tangent(tangents, aspect, options.fov_scale);
-        const float fov = math::native_fov_degrees(tangent * options.fov_correction, aspect, options.fov_vertical);
+        const float correction = options.efficient_fov && options.stereo_mode == 2 && s.native_fov_ready.load(std::memory_order_acquire)
+            ? 1.0f : options.fov_correction;
+        const float fov = math::native_fov_degrees(tangent * correction, aspect, options.fov_vertical);
         if (!std::isfinite(fov) || fov < 10.0f || fov > 170.0f) {
             if (now - c.last_skip_log > 1.0) {
                 c.last_skip_log = now;
@@ -712,7 +720,7 @@ bool apply_camera(std::array<float, 16>& matrix, CameraWriter writer, const Body
             EyeRecord record{};
             record.view = view;
             record.pose = eye;
-            record.fov = math::layer_angles(tangent * options.fov_correction, aspect);
+            record.fov = math::layer_angles(tangent * correction, aspect);
             record.world = result;
             record.world_scale = options.world_scale;
             record.sampled = now;

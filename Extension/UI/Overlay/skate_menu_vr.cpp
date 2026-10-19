@@ -81,7 +81,7 @@ void vr_controls(SkateMenu& menu, const Model& model, const CallbacksV3& callbac
         options.hud_area * 100.0f, 10.0f, 100.0f, "%.0f%%", [&](float v) { options.hud_area = v / 100.0f; changed = true; });
     ImGui::EndDisabled();
     if (!vr::hud_layout_available()) note("HUD layout control is unavailable for this game build.");
-    if (toggle_row(menu, "View-switch shortcut", "Use the Quest input mapped to Switch first / third person, or L3 on a regular gamepad. Right stick click recentres by default.",
+    if (toggle_row(menu, "View-switch shortcut", "Use the tracked-controller input mapped to Switch first / third person, or L3 on a regular gamepad. Right stick click recentres by default.",
             options.stick_view_switch)) changed = true;
     if (toggle_row(menu, "Controller menu pointer", "Point with the right controller and click with its trigger in menus. Off keeps gamepad navigation.",
             options.menu_pointer)) changed = true;
@@ -106,15 +106,15 @@ void vr_controls(SkateMenu& menu, const Model& model, const CallbacksV3& callbac
     }
     // Quest 2: start with a modest source resolution (2048 square), a
     // conservative disparity and enough FOV margin for eye reprojection.
-    if (primary_button(menu, "Quest 2 balanced", true)) {
+    if (primary_button(menu, "Balanced VR", true)) {
         options = vr::quest2_balanced(options);
         changed = true;
     }
-    note("Quest 2: try 2048x2048 windowed, disable frame generation and V-Sync. "
+    note("VR: start with a square window, disable frame generation and V-Sync. "
          "Use Depth strength 0 to diagnose eye alignment without stereo separation.");
     if (!model.debug.first_person && !options.auto_first_person)
         note("Turn on First person in the CAMERA tab to see the world in 3D. Until then the game shows on a flat screen.");
-    note("For smoother turns, use 72 Hz in Link and lower game graphics until FPS matches it. Keep V-Sync, frame generation and motion blur off.");
+    note("For smoother turns, use a stable supported headset refresh rate and lower game graphics until FPS matches it. Keep V-Sync, frame generation and motion blur off.");
     end_card();
 
     // ---- Presets.
@@ -254,7 +254,7 @@ void vr_controls(SkateMenu& menu, const Model& model, const CallbacksV3& callbac
     begin_card(menu, "vr-controls", "CONTROLS");
     int source = options.controllers ? 0 : 1;
     if (tiles(menu, "Input source", "Head tracking stays on with either choice. Your normal gamepad always works.",
-            "##vr-source", source, {"Quest + gamepad", "Regular gamepad only"})) {
+            "##vr-source", source, {"VR controllers + gamepad", "Regular gamepad only"})) {
         options.controllers = source == 0; changed = true;
     }
     note("Regular gamepad controls: use the game's own controller settings. ReSkate shortcuts are in Settings > Controls. Your configured keyboard menu key still opens this menu.");
@@ -266,7 +266,7 @@ void vr_controls(SkateMenu& menu, const Model& model, const CallbacksV3& callbac
     }
     note("Enable voice chat and adjust microphone volume in Online > Voice. Set your regular push-to-talk key/controller chord there. Toggle mode resets after focus/session loss or input changes.");
     if (options.controllers) {
-        note("Choose an action for each Quest control. Changes save automatically. Release all buttons/triggers after rebinding. Sticks retain their normal axes; D-pad shift reserves the left stick while held.");
+        note("Choose an action for each tracked-controller input. Changes save automatically. Release all buttons/triggers after rebinding. Sticks retain their normal axes; D-pad shift reserves the left stick while held.");
         for (std::size_t i = 0; i < options.bindings.size(); ++i) {
             ImGui::PushID(static_cast<int>(i));
             field(menu, vr::controls::input_names[i], "Choose a game action, VR shortcut or Voice talk. Not bound disables this input outside menu pointing.");
@@ -289,7 +289,7 @@ void vr_controls(SkateMenu& menu, const Model& model, const CallbacksV3& callbac
                 }
             ImGui::EndCombo();
         }
-        if (primary_button(menu, "Reset Quest button bindings", true)) {
+        if (primary_button(menu, "Reset VR button bindings", true)) {
             options.bindings = vr::controls::defaults; options.pointer_button = 5; changed = true;
         }
         note("Default: left click switches view, right click recentres; menu short press pauses, hold opens ReSkate. Menu click can be reassigned above. Assign Voice talk to any spare button to talk without the keyboard.");
@@ -334,6 +334,13 @@ void vr_controls(SkateMenu& menu, const Model& model, const CallbacksV3& callbac
                 options.gap_fill, {"Stretch edge", "Background"}))
             changed = true;
     }
+    if (vr_status.source_coverage > 0)
+        info(menu, "Source image used", std::format("about {:.0f}% per eye before head-turn warp", vr_status.source_coverage));
+    ImGui::BeginDisabled(!vr_status.measured_fov_ready);
+    if (toggle_row(menu, "Sharper source framing", "Use more source pixels for the headset by removing extra legacy framing correction. Keeps the Render FOV margin. Off restores your previous framing; fast turns may expose image edges.", options.efficient_fov)) changed = true;
+    ImGui::EndDisabled();
+    if (toggle_row(menu, "Headset presentation pacing", "Avoid a second desktop V-Sync wait while OpenXR paces VR. Does not remove the game's frame-rate limiter. Turn off to compare.", options.headset_pacing)) changed = true;
+    note("For 90 Hz, set game Frame rate limit to Unlimited and V-Sync/Frame generation off. This does not guarantee 90 fps; use the frame readout above to check.");
     slider(menu, "Render FOV", "Rendered field of view relative to the headset's. More covers fast head turns.",
         options.fov_scale, Limits::fov_scale_min, Limits::fov_scale_max, "%.2fx", set(options.fov_scale));
     slider(menu, "Zoom fix", "If the world looks magnified, raise this until objects look real-size.", options.fov_correction,

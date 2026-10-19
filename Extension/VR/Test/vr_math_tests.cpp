@@ -43,6 +43,31 @@ Quat pitch(float radians) { return {std::sin(radians / 2), 0, 0, std::cos(radian
 
 int main() {
     {
+        const Angles eye{-.7f, .8f, .8f, -.75f};
+        for (const float tangent : {1.1f, 1.1f * 1.23f}) {
+            const auto source = layer_angles(tangent, 1);
+            const auto uv = eye_uv_mapping(source, eye);
+            CHECK(uv.has_value());
+            const float u = .7f, v = .3f;
+            const float source_x = (uv->u_bias + u * uv->u_scale - .5f) * 2 * tangent;
+            const float source_y = (.5f - uv->v_bias - v * uv->v_scale) * 2 * tangent;
+            CHECK(near(source_x, std::tan(eye.left) + u * (std::tan(eye.right) - std::tan(eye.left))));
+            CHECK(near(source_y, std::tan(eye.up) - v * (std::tan(eye.up) - std::tan(eye.down))));
+        }
+    }
+    {
+        CHECK(menu_wheel(.2f, .016f) == 0);
+        CHECK(menu_wheel(0, .016f) == 0);
+        CHECK(menu_wheel(1, .016f) > 0 && menu_wheel(-1, .016f) < 0);
+        CHECK(near(menu_wheel(1, 1.f / 90) * 90, menu_wheel(1, 1.f / 72) * 72));
+        CHECK(near(menu_wheel(1, 10), .3f)); // no wheel burst after a stalled frame
+        CHECK(menu_wheel(1, -1) == 0);
+        CHECK(menu_wheel(std::numeric_limits<float>::quiet_NaN(), .016f) == 0);
+        CHECK(panel_uv_valid(0, 0) && panel_uv_valid(1, 1));
+        CHECK(!panel_uv_valid(-.01f, .5f) && !panel_uv_valid(.5f, 1.01f));
+        CHECK(!panel_uv_valid(std::numeric_limits<float>::quiet_NaN(), .5f));
+    }
+    {
         namespace control = dingosdk::vr::controls;
         auto bindings = control::defaults;
         control::Values raw{};

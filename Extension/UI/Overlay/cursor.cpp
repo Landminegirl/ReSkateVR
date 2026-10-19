@@ -2,6 +2,7 @@
 #include "cursor.h"
 #include "input_capture.h"
 #include "Extension/VR/vr.h"
+#include "Extension/VR/vr_math.h"
 #include "Engine/Core/Log/logging.h"
 #include <array>
 #include <cfloat>
@@ -244,6 +245,11 @@ void update_menu_pointer() {
         io.AddMousePosEvent(pointer.hovering ? pointer.u * io.DisplaySize.x : -FLT_MAX,
             pointer.hovering ? pointer.v * io.DisplaySize.y : -FLT_MAX);
         io.AddMouseButtonEvent(0, pointer.down);
+        const auto pad = dingosdk::overlay::read_gamepad();
+        if (pointer.hovering && pad.valid) {
+            const float wheel = dingosdk::vr::math::menu_wheel(pad.right_y, io.DeltaTime);
+            if (wheel != 0) io.AddMouseWheelEvent(0, wheel);
+        }
         for (int button = 1; button < 5; ++button) io.AddMouseButtonEvent(button, false);
         vr_owned = true;
         return;

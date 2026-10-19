@@ -115,6 +115,8 @@ HRESULT STDMETHODCALLTYPE present(IDXGISwapChain* chain, UINT interval, UINT fla
     PresentGuard guard;
     if (guard.outermost) guarded_render(chain, flags);
     const bool observed = guard.outermost && observe_present(chain, flags);
+    // OpenXR already paced this frame. Do not add a second desktop V-Sync wait.
+    if (observed && dingosdk::vr::headset_pacing_active()) interval = 0;
     const HRESULT result = original<PresentFn>(state().present)(chain, interval, flags);
     complete_present(observed);
     if (result == DXGI_ERROR_DEVICE_REMOVED || result == DXGI_ERROR_DEVICE_RESET) {
@@ -130,6 +132,7 @@ HRESULT STDMETHODCALLTYPE present1(IDXGISwapChain1* chain, UINT interval, UINT f
     PresentGuard guard;
     if (guard.outermost) guarded_render(chain, flags);
     const bool observed = guard.outermost && observe_present(chain, flags);
+    if (observed && dingosdk::vr::headset_pacing_active()) interval = 0;
     const HRESULT result = original<Present1Fn>(state().present1)(chain, interval, flags, parameters);
     complete_present(observed);
     if (result == DXGI_ERROR_DEVICE_REMOVED || result == DXGI_ERROR_DEVICE_RESET) {

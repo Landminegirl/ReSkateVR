@@ -100,6 +100,8 @@ struct Settings {
     // Native safe-area layout: smaller moves HUD anchors inwards, preserving text size.
     float hud_area = 0.5f;
     bool late_rotation = true;
+    bool headset_pacing = true;
+    bool efficient_fov = false; // Reversible source framing; preserve previous calibration by default.
     bool menu_pointer = true;
     // Eye reconstruction resolution and ray search quality, independent of scene FOV.
     float eye_render_scale = 0.75f;
@@ -253,6 +255,7 @@ struct MenuPointer {
 // Read by the overlay on its render thread; inactive outside the VR menu panel.
 MenuPointer menu_pointer() noexcept;
 void cancel_menu_pointer() noexcept;
+bool headset_pacing_active() noexcept;
 // Same for the game's own main or pause menu (client thread).
 void set_game_menu(bool open) noexcept;
 bool game_menu_open() noexcept;
@@ -263,6 +266,8 @@ struct Status {
     std::string runtime, system, state = "off", message;
     std::uint32_t image_width = 0, image_height = 0;
     std::uint32_t recommended_width = 0, recommended_height = 0;
+    float source_coverage = 0;
+    bool measured_fov_ready = false;
     float display_hz = 0, present_hz = 0, camera_hz = 0;
     float render_fov_degrees = 0;
     std::uint64_t frames_submitted = 0, eye_images = 0, repeated_images = 0;

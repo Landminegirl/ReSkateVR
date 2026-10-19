@@ -90,6 +90,8 @@ struct Field {
     int binding = -1;
 };
 const std::array fields{
+    Field{.key = "VR.HeadsetPacing", .flag = &Settings::headset_pacing},
+    Field{.key = "VR.EfficientFov", .flag = &Settings::efficient_fov},
     Field{.key = "VR.PointerButton", .whole = &Settings::pointer_button},
     Field{.key = "VR.VoiceToggle", .flag = &Settings::voice_toggle},
     Field{.key = "VR.Binding0", .binding = 0},

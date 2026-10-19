@@ -98,6 +98,7 @@ struct Shared {
     std::optional<EyeRecord> rendered;
     std::uint64_t render_sequence = 0;
     std::atomic<bool> render_pose_available{false};
+    std::atomic<bool> native_fov_ready{false};
     std::atomic<std::uint64_t> rendered_frames{0};
     std::uint64_t next_sequence = 1;
 

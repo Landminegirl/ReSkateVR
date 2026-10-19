@@ -1,4 +1,4 @@
-# Quest 2 alignment, head camera and Play / Launch VR
+# OpenXR alignment, head camera and Play / Launch VR
 
 Player download: copy the compiled DLL, launcher and OpenXR loader into an
 existing ReSkate installation, connect Link / Air Link, and click LAUNCH VR.
@@ -7,9 +7,9 @@ See PLAY.txt. Players do not need a terminal or development tools.
 PLAY disables VR for that session and preserves saved display options.
 LAUNCH VR sends a session-only VR start request and requests a 2048-square
 window without changing saved launcher display preferences. The runtime loads
-the player's profile, applies the shared Quest 2 balanced preset once, and
+the player's profile, applies the shared Balanced VR preset once, and
 preserves subsequent tuning. Future VR starts enable VR with that saved tuning.
-The in-game Quest 2 balanced button uses the same preset and also enables VR.
+The in-game Balanced VR button uses the same preset and also enables VR.
 
 Depth stereo resamples the symmetric camera source into each runtime eye's
 asymmetric frustum. The submitted frusta match the mapped images. Invalid
@@ -59,7 +59,7 @@ performance resolved until physical testing confirms it.
 Native tests cover stationary rotation through near-vertical pitch and roll,
 orthonormal camera axes, direct lean, animation isolation, locomotion, recenter
 resampling, and preservation of existing stereo calibration during migration.
-Physical Quest 2 testing and sustained frame-rate measurements remain outstanding.
+Physical headset testing and sustained frame-rate measurements remain outstanding.
 
 ## v3 launcher and game HUD
 
@@ -141,7 +141,7 @@ rotation with pitch and roll, and removal of an 80-degree player rig from observ
 tracking orientation. The existing tests cover camera/eye projection and controls.
 Local shader compilation and Python reference tests pass. Windows C++ compilation
 and those native tests must pass in the release workflow before delivering a player
-ZIP. Physical Quest / Link jitter reduction is not established by these tests.
+ZIP. Physical headset jitter reduction is not established by these tests.
 
 ## v6 view centering and menu interaction
 
@@ -167,7 +167,7 @@ mouse motion/button events only while the game window is foreground. Right trigg
 is reserved for pointing only while menus and the pointer are enabled. Trigger
 holds across menu/context entry do not click until released. Ray/panel loss, focus
 loss, recenter, stopping VR and teardown release owned presses. Native menu widget
-compatibility and actual pointer visuals still need Quest testing; gamepad navigation
+compatibility and actual pointer visuals still need headset testing; gamepad navigation
 remains available, and Controller menu pointer is an opt-out.
 
 Regression coverage adds menu threshold/hold/focus behavior, single-press recenter,
@@ -183,15 +183,46 @@ continues to reject exclusive fullscreen/maximize and constrains square resizing
 The first VR launch opens a five-page guide; closing cancels startup and only
 finishing acknowledges it. It can be replayed in the launcher or headset menu.
 
-ADDONS > VR > CONTROLS selects Quest + gamepad or Regular gamepad only.
-Twelve Quest inputs (including short/hold menu gestures) map to game buttons,
+ADDONS > VR > CONTROLS selects VR controllers + gamepad or Regular gamepad only.
+Twelve tracked-controller inputs (including short/hold menu gestures) map to game buttons,
 VR shortcuts, D-pad shift or Voice talk. The click input for the right-hand
 ray is separate and consumes its gameplay action in menus. Bindings and voice
 mode are profile values and preset fields; reset bindings does not alter comfort.
 Changes require releasing controls so held inputs cannot activate a new mapping.
 
-The voice worker combines Quest Voice talk with the existing keyboard/controller
+The voice worker combines VR controller Voice talk with the existing keyboard/controller
 PTT gate, then applies hold/toggle activation while VR is enabled. A release is
 required after binding/source/mode/session changes. Existing host policy, focus,
 menu, peer and microphone-volume gates remain in force. Open mic stays separate.
 Steam capture and headset UX are not established by the pure routing/latch tests.
+
+
+## v9 menu pointer, source framing and pacing
+
+Right-stick vertical input becomes an ImGui mouse wheel under the active ray;
+normal right-stick navigation events are suppressed in that mode to avoid double
+scrolling. Dead-zone and elapsed-time scaling keep it consistent across refresh
+rates. Off-panel rays emit no scroll. Without ray mode, regular navigation stays.
+
+Native pointer injection validates the projected pixel against WindowFromPoint's
+root owner before moving and checks cursor/foreground ownership again before
+submitting the validated move and press together as an ordered SendInput batch. Off-desktop, occluded or other-window targets are rejected; no ClipCursor
+trap is used. A drag releases on invalid targets and requires release to rearm.
+This specifically addresses square clients larger than the physical monitor.
+
+The optional Sharper source framing uses correction 1 only when measured native
+FOV pairing is live in depth stereo. Actual measured FOV still drives submitted
+image projection. The old calibration remains saved and returns when this is off
+or measured pairing is unavailable. Render FOV remains the overscan margin. A source
+coverage estimate and log fields help compare pixel utilization; fast-turn holes
+are still possible. Projection regression cases confirm identical target rays for
+the old/new symmetric source FOVs. It is not a physical image-quality validation.
+
+Headset presentation pacing sets the observed primary swapchain's Present interval
+to zero only while VR tracking/pacing is active. OpenXR still paces the frame;
+standard play and Present(TEST) are unchanged. This avoids a desktop V-Sync wait,
+but does not uncap the game's frame limiter or synthesize 90 scene frames. The
+latest user's source log was roughly 60 presents/s at a 72 Hz headset. 90 Hz
+comfort/artifact improvement still requires hardware testing.
+
+Input batch ordering follows [Microsoft SendInput documentation](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-sendinput).

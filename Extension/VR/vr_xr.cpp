@@ -236,6 +236,7 @@ void teardown(const std::string& reason, double retry) {
     auto& s = shared();
     auto& r = runtime();
     s.tracking.store(false, std::memory_order_release);
+    s.native_fov_ready.store(false, std::memory_order_release);
     s.predicted_display_time.store(0, std::memory_order_release);
     end_empty_frame();
     {
@@ -596,14 +597,14 @@ void publish_rates(double now) {
         }
         log_info(std::format("stats: state {}, headset {:.0f} Hz, presents {:.1f}/s, camera frames {:.1f}/s, "
             "pairing none/one/more {}/{}/{}, eye images {}, repeats {}, frames {}, {}, image {}x{} format {}, render FOV {:.1f}, "
-            "frame lag {}, camera thread {}, present thread {}, eye reconstruction {}x{} / {} samples, pose pairing {}, native/legacy {}/{}, render observations {}, late rotation {}, depth pair misses {}",
+            "frame lag {}, camera thread {}, present thread {}, eye reconstruction {}x{} / {} samples, pose pairing {}, native/legacy {}/{}, render observations {}, late rotation {}, depth pair misses {}, source coverage {:.1f}%/eye, headset pacing {}, efficient framing {}",
             snapshot.state, period > 0 ? 1e9 / static_cast<double>(period) : 0.0, present_hz, camera_hz,
             r.pairing[0], r.pairing[1], r.pairing[2], snapshot.eye_images, snapshot.repeated_images, snapshot.frames_submitted,
             camera_active(now) ? "VR camera" : snapshot.theater_active ? "flat screen" : "idle",
             snapshot.image_width, snapshot.image_height, r.image_format, fov, current_settings().frame_lag, camera_thread,
             GetCurrentThreadId(), r.eyes[0].width, r.eyes[0].height, current_settings().stereo_steps,
             r.renderer_pairing ? "renderer" : "legacy", r.native_pairs, r.legacy_pairs,
-            s.rendered_frames.load(std::memory_order_relaxed), current_settings().late_rotation, r.depth_misses));
+            s.rendered_frames.load(std::memory_order_relaxed), current_settings().late_rotation, r.depth_misses, snapshot.source_coverage, current_settings().headset_pacing, current_settings().efficient_fov));
         r.pairing = {};
     }
     update_status([&](Status& st) {
@@ -914,6 +915,7 @@ void on_present(IDXGISwapChain3* chain, ID3D12CommandQueue* queue) noexcept {
                     } else match.reset();
                 }
             }
+            s.native_fov_ready.store(options.stereo_mode == 2 && r.renderer_pairing, std::memory_order_release);
             if (match && !r.renderer_pairing) ++r.legacy_pairs;
             // Menus are drawn into the image, so they only read on the flat screen.
             const bool vr_camera = camera_active(now) && !s.ui_open.load(std::memory_order_acquire) &&
@@ -994,6 +996,13 @@ void on_present(IDXGISwapChain3* chain, ID3D12CommandQueue* queue) noexcept {
                             mapped[e] = true;
                         }
                     }
+                    float coverage = 0;
+                    for (std::size_t e = 0; e < 2; ++e) if (mapped[e])
+                        coverage += std::clamp(params.u_scale[e], 0.0f, 1.0f) * std::clamp(params.v_scale[e], 0.0f, 1.0f) * 50.0f;
+                    update_status([&](Status& st) {
+                        st.source_coverage = coverage;
+                        st.measured_fov_ready = r.renderer_pairing;
+                    });
                     const auto eye_width = math::eye_extent(desc.Width, options.eye_render_scale);
                     const auto eye_height = math::eye_extent(desc.Height, options.eye_render_scale);
                     if (ensure_chain(r.eyes[0], eye_width, eye_height, error) && ensure_chain(r.eyes[1], eye_width, eye_height, error) &&

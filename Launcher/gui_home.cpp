@@ -215,13 +215,12 @@ bool settings_tile(ImDrawList* draw, const Fonts& fonts, ImVec2 position, ImVec2
 }
 
 // A small tile in the bottom-left corner: what each release changed.
-bool changelog_tile(ImDrawList* draw, const Fonts& fonts, ImVec2 position, ImVec2 size, bool enabled) {
+bool changelog_tile(ImDrawList* draw, const Fonts& fonts, ImVec2 position, ImVec2 size, bool enabled, const char* label = "CHANGELOGS", const char* id = "##changelog") {
     bool hovered{};
-    const bool pressed = tile_hit("##changelog", position, size, enabled, hovered);
+    const bool pressed = tile_hit(id, position, size, enabled, hovered);
     const ImVec2 end(position.x + size.x, position.y + size.y);
     rough_rect(draw, position, end, hovered ? color::tile_grey : color::tile, 9);
     if (hovered) draw->AddRect(ImVec2(position.x - S(3), position.y - S(3)), ImVec2(end.x + S(3), end.y + S(3)), color::text, 0, 0, S(3));
-    const char* label = "CHANGELOGS";
     const auto extent = fonts.heading->CalcTextSizeA(fonts.heading->FontSize, FLT_MAX, 0, label);
     draw->AddText(fonts.heading, fonts.heading->FontSize,
         ImVec2(position.x + (size.x - extent.x) * 0.5f, position.y + (size.y - extent.y) * 0.5f), color::text, label);
@@ -483,7 +482,7 @@ void frame(Launcher& launcher, const Fonts& fonts, HWND window, Ui& ui, ModsPane
     case Phase::mods_broken: label = "LAUNCH VR"; enabled = false; detail = "Waiting on an answer about your mods"; break;
     case Phase::ready:
         label = "LAUNCH VR";
-        detail = "Quest 2 / OpenXR - connect Link, then launch";
+        detail = "OpenXR - start your headset PC VR runtime";
         break;
     case Phase::launching: label = "LAUNCHING"; enabled = false; break;
     case Phase::failed: label = "RETRY"; break;
@@ -521,7 +520,7 @@ void frame(Launcher& launcher, const Fonts& fonts, HWND window, Ui& ui, ModsPane
         ImGui::PopID();
         ImGui::PushID("vr-start");
         const ImVec2 vr_position(primary.x, primary.y + S(94));
-        if (action_tile(draw, fonts, vr_position, tile_size, "LAUNCH VR", "Quest 2 / OpenXR", enabled && !modal, false, {}, true)) act(true);
+        if (action_tile(draw, fonts, vr_position, tile_size, "LAUNCH VR", "OpenXR headset", enabled && !modal, false, {}, true)) act(true);
         ImGui::PopID();
     } else {
         if (action_tile(draw, fonts, primary, primary_size, label, detail, enabled && !modal, secondary, play_mark)) act(false);
@@ -561,6 +560,10 @@ void frame(Launcher& launcher, const Fonts& fonts, HWND window, Ui& ui, ModsPane
 
     // Level with PLAY's bottom edge, in the opposite corner.
     const ImVec2 changelog_size(S(200), S(52));
+    if (changelog_tile(draw, fonts, ImVec2(S(60), size.y - S(56) - changelog_size.y * 2 - S(10)),
+            changelog_size, !modal, "VR TUTORIAL", "##vr-tutorial")) {
+        ui.vr_guide = true; ui.vr_guide_launch = false; ui.vr_guide_page = 0;
+    }
     if (changelog_tile(draw, fonts, ImVec2(S(60), size.y - S(56) - changelog_size.y), changelog_size, !modal))
         ui.changelog = true;
 
