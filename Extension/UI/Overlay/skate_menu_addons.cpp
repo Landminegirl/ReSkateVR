@@ -124,7 +124,7 @@ void addons_page(SkateMenu& menu, const Model& model, const CallbacksV3& callbac
         else if (menu.addon == addon_road_rash) road_rash_addon(menu, model, callbacks);
         else if (menu.addon == addon_hall_of_meat) hall_of_meat_addon(menu, model, callbacks);
         else if (menu.addon == addon_grind_exits) grind_exits_addon(menu, model, callbacks);
-        else if (menu.addon == addon_vr) vr_controls(menu, model);
+        else if (menu.addon == addon_vr) vr_controls(menu, model, callbacks);
         else all_addons(menu, model);
         ImGui::EndChild();
         break;

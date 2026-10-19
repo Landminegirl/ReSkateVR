@@ -578,8 +578,10 @@ void feed_menu_gamepad(bool menu_open) {
     stick(ImGuiKey_GamepadLStickUp, pad.left_y);
     stick(ImGuiKey_GamepadLStickDown, -pad.left_y);
     // The right stick scrolls the full screen menu's page.
-    stick(ImGuiKey_GamepadRStickUp, pad.right_y);
-    stick(ImGuiKey_GamepadRStickDown, -pad.right_y);
+    // The tracked ray scrolls its hovered widget with actual mouse-wheel events.
+    const bool ray_scroll = menu_open && dingosdk::vr::menu_pointer().active;
+    stick(ImGuiKey_GamepadRStickUp, ray_scroll ? 0.0f : pad.right_y);
+    stick(ImGuiKey_GamepadRStickDown, ray_scroll ? 0.0f : -pad.right_y);
     fed = pad.valid;
     if (fed && !(menu_open && dingosdk::overlay::menu_page_owns_pad().load())) {
         io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
@@ -897,7 +899,7 @@ void render(IDXGISwapChain* presented, UINT flags) {
     sync_menu_cursor();
     // (Watching the pointer for the pause menu's browser keeps the mouse state between frames,
     // or every frame would look like a fresh click.)
-    if (!interactive) { ImGui::GetIO().ClearInputKeys(); if (!hub_frame) ImGui::GetIO().ClearInputMouse(); }
+    if (!interactive) { ImGui::GetIO().ClearInputKeys(); if (!hub_frame && !dingosdk::vr::menu_pointer().active) ImGui::GetIO().ClearInputMouse(); }
     feed_menu_gamepad(interactive && s.visible.load() && !s.editor_visible.load());
     ImGui::GetIO().MouseDrawCursor = owns_menu_cursor(s);
     ImGui_ImplDX12_NewFrame();

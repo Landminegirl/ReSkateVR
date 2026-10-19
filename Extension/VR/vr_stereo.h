@@ -7,6 +7,7 @@
 #include <d3d12.h>
 #include <wrl/client.h>
 #include <array>
+#include <cstdint>
 #include <string>
 #include <unordered_map>
 
@@ -18,10 +19,26 @@ struct StereoParams {
     // Holes the centre view never saw: background (farthest surface) or the near edge stretched.
     bool background_fill = true;
     float vignette = 0; // comfort vignette (0 none)
+    unsigned steps = 24;
+    float source_horizontal = 1, source_vertical = 1;
+    // Columns of target-eye-to-source-camera rotation, one basis per eye.
+    using Rotation = std::array<std::array<float, 3>, 3>;
+    static constexpr Rotation identity{{{1,0,0}, {0,1,0}, {0,0,1}}};
+    std::array<Rotation, 2> rotation{identity, identity};
+    // Map each output eye UV into the symmetric centre-camera image.
+    // Identity means the old symmetric projection (used for debugging).
+    std::array<float, 2> u_scale{1.0f, 1.0f}, v_scale{1.0f, 1.0f};
+    std::array<float, 2> u_bias{}, v_bias{};
 };
 
 // The scene depth copy (vr_depth.cpp): typeless, COPY_DEST between uses; null until copied.
-Microsoft::WRL::ComPtr<ID3D12Resource> depth_texture();
+struct DepthSnapshot {
+    Microsoft::WRL::ComPtr<ID3D12Resource> texture;
+    std::uint64_t present = 0;
+    bool valid = false;
+};
+DepthSnapshot depth_snapshot();
+std::uint64_t depth_present() noexcept;
 
 class DepthStereo {
 public:

@@ -60,9 +60,16 @@ struct EyeRecord {
     std::uint32_t view = 0;
     math::Pose pose; // tracking space (LOCAL), not recentered
     math::Angles fov;
+    // Headset-specific asymmetric eye frusta. The game still renders a
+    // symmetric centre-camera image for the depth reconstruction pass.
+    std::array<math::Angles, 2> headset_fov{};
     // Side-by-side input: one image holds both eyes, rendered from between them.
     bool both = false;
     math::Pose left, right;
+    math::Matrix world{};
+    float world_scale = 1;
+    double sampled = 0;
+    std::uint64_t generation = 0;
 };
 
 struct Shared {
@@ -87,6 +94,13 @@ struct Shared {
     // Camera frames waiting for their image; newest last.
     std::mutex records_mutex;
     std::deque<EyeRecord> records;
+    std::deque<EyeRecord> issued; // every camera writer, including ticks
+    std::optional<EyeRecord> rendered;
+    std::uint64_t render_sequence = 0;
+    std::atomic<bool> render_pose_available{false};
+    std::atomic<bool> profile_ready{false};
+    std::atomic<bool> native_fov_ready{false};
+    std::atomic<std::uint64_t> rendered_frames{0};
     std::uint64_t next_sequence = 1;
 
     std::atomic<double> camera_time{-100.0};      // last VR camera write
@@ -123,4 +137,7 @@ inline XrPosef to_xr(const math::Pose& pose) {
     return result;
 }
 bool left_hand_pose(XrSpace base, XrTime time, math::Pose& out) noexcept;
+bool right_aim_pose(XrSpace base, XrTime time, math::Pose& out, bool& trigger) noexcept;
+void publish_menu_pointer(HWND window, bool active, const std::optional<math::PanelHit>& hit, bool trigger, bool overlay) noexcept;
+void release_menu_pointer() noexcept;
 }

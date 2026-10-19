@@ -15,9 +15,11 @@
 //   apply_camera / camera_fov    engine thread (first-person camera writes)
 //   on_present / after_present   the game's Present thread (overlay hook)
 //   everything else              any thread
+#include "vr_bindings.h"
 #include <array>
 #include <atomic>
 #include <cstdint>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -37,6 +39,8 @@ struct Settings {
     // Only the skater's heading turns the view; the horizon stays level.
     // Off also follows the animated head's pitch and roll (strong motion).
     bool level_horizon = true;
+    // Keep the tracking origin fixed to the player, independent of head animation.
+    bool head_centred = false;
     // Seconds for the view to follow the skater's heading; 0 follows directly.
     float turn_smoothing = 0.61f;
     // Metres of game world per metre of real head movement and eye separation.
@@ -77,6 +81,9 @@ struct Settings {
     bool lens_effects_off = true;
     // The headset's controllers act as the gamepad (pad 0, merged with a real pad).
     bool controllers = true;
+    controls::Bindings bindings = controls::defaults;
+    int pointer_button = 5; // 0..9 physical input, 10 disables click (ray still visible).
+    bool voice_toggle = false;
     // Depth stereo edges: pixels the near depth is widened by (0-3; more keeps soft
     // edges on their object, less keeps narrow gaps open), and how holes behind near
     // objects are filled: 1 background, 0 stretched near edge.
@@ -89,6 +96,16 @@ struct Settings {
     // 0 first person; 1 third person (the camera orbits behind the skater at
     // third_distance and third_height; the head is not hidden).
     int view_mode = 0;
+    bool stick_view_switch = true;
+    // Native safe-area layout: smaller moves HUD anchors inwards, preserving text size.
+    float hud_area = 0.5f;
+    bool late_rotation = true;
+    bool headset_pacing = true;
+    bool efficient_fov = true; // Use measured FOV framing by default; previous correction remains saved.
+    bool menu_pointer = true;
+    // Eye reconstruction resolution and ray search quality, independent of scene FOV.
+    float eye_render_scale = 0.75f;
+    int stereo_steps = 24;
     float third_distance = 2.5f, third_height = 0.5f;
     // First person on foot: the view turns only with the headset (and stick turns), not with
     // the body, so the stick walks where you look. The game moves the skater relative to the
@@ -134,6 +151,46 @@ struct Settings {
     // Virtual-key code that recenters the view; 0 disables it. Default F8.
     int recenter_key = 0x77;
 };
+
+inline bool virtual_controller_requested(bool enabled, bool controllers, bool profile_ready, char launch_choice) noexcept {
+    if (!controllers) return false;
+    if (profile_ready) return enabled;
+    if (launch_choice == '0') return false;
+    return enabled || launch_choice == '1';
+}
+
+// An explicit standard start must override a previously saved VR-on preference.
+inline Settings apply_launch_choice(Settings value, char choice) noexcept {
+    if (choice == '0' || choice == '1') value.enabled = choice == '1';
+    return value;
+}
+
+// Camera-only migration preserves the player's stereo, FOV and image pairing.
+inline Settings quest2_head_camera(Settings value) noexcept {
+    value.head_centred = true;
+    value.positional = true;
+    value.level_horizon = true;
+    value.view_mode = 0;
+    value.seat_forward = value.seat_side = value.seat_up = 0;
+    value.seat_forward_foot = value.seat_side_foot = value.seat_up_foot = 0;
+    value.bail_camera = value.grab_view = value.grab_body = false;
+    value.crouch_follow = 0;
+    return value;
+}
+
+// Starting values shared by the launcher bootstrap and the in-game preset.
+inline Settings quest2_balanced(Settings value) noexcept {
+    value.enabled = true;
+    value.auto_first_person = true;
+    value.stereo_mode = 2;
+    value.depth_strength = 0.35f;
+    value.world_scale = 1.0f;
+    value.fov_scale = 1.10f;
+    value.edge_widening = 1;
+    value.gap_fill = 1;
+    value.lens_effects_off = true;
+    return quest2_head_camera(value);
+}
 
 struct Limits {
     static constexpr float turn_smoothing_max = 2.0f;
@@ -198,6 +255,17 @@ void set_ui_open(bool open) noexcept;
 // width x height pixels used; 0 x 0 when there is no chat to show) and hands it over each frame.
 bool wants_chat_panel() noexcept;
 void submit_chat_panel(ID3D12Resource* texture, std::uint32_t width, std::uint32_t height) noexcept;
+struct MenuPointer {
+    bool active = false, hovering = false, down = false;
+    float u = 0, v = 0;
+};
+// Read by the overlay on its render thread; inactive outside the VR menu panel.
+MenuPointer menu_pointer() noexcept;
+void cancel_menu_pointer() noexcept;
+bool native_menu_pointer_active() noexcept;
+void set_chat_shortcut_region(float left, float top, float right, float bottom) noexcept;
+void set_chat_keyboard_open(bool open) noexcept;
+bool headset_pacing_active() noexcept;
 // Same for the game's own main or pause menu (client thread).
 void set_game_menu(bool open) noexcept;
 bool game_menu_open() noexcept;
@@ -208,6 +276,8 @@ struct Status {
     std::string runtime, system, state = "off", message;
     std::uint32_t image_width = 0, image_height = 0;
     std::uint32_t recommended_width = 0, recommended_height = 0;
+    float source_coverage = 0;
+    bool measured_fov_ready = false;
     float display_hz = 0, present_hz = 0, camera_hz = 0;
     float render_fov_degrees = 0;
     std::uint64_t frames_submitted = 0, eye_images = 0, repeated_images = 0;
@@ -226,6 +296,7 @@ struct BodyPose {
     bool on_board = false;
     std::uint32_t physics_state = 0; // the game's skater physics state (300 wipeout); 0 unknown
     std::array<float, 16> board{};   // the board's world matrix while on it; zero otherwise
+    float trajectory_heading = std::numeric_limits<float>::quiet_NaN();
 };
 // Moves a native camera matrix (rows right, up, backward, position; fourth
 // lanes left as they are) to this frame's eye. Returns false, leaving the
@@ -236,6 +307,11 @@ bool apply_camera(std::array<float, 16>& matrix, CameraWriter writer, const Body
 // Depth stereo: hooks D3D12 device creation (call at startup, before the game
 // creates its device) to find the scene depth buffer.
 void start_depth_probe() noexcept;
+void start_hud_layout(std::uintptr_t base) noexcept;
+bool hud_layout_available() noexcept;
+// Native rendered-view observer; shares the existing guarded renderer hook.
+void observe_render_view(std::uintptr_t view) noexcept;
+void set_render_pose_available(bool available) noexcept;
 // Present thread: picks the scene depth for this image size.
 void depth_on_present(std::uint64_t width, std::uint32_t height) noexcept;
 // Copies the scene depth (previous frame) at each of its clears while enabled.
@@ -243,6 +319,9 @@ void set_depth_copy(bool enabled) noexcept;
 // A gamepad state the overlay's XInput hook merges into pad 0 (sticks -32768..32767,
 // XINPUT_GAMEPAD_* buttons, triggers 0..255).
 struct VirtualPad {
+    bool voice_down = false;
+    std::uint64_t binding_revision = 0;
+    bool left_click = false, right_click = false;
     bool active = false;
     std::uint16_t buttons = 0;
     std::uint8_t left_trigger = 0, right_trigger = 0;
@@ -255,6 +334,7 @@ VirtualPad controller_pad() noexcept;
 void observe_gamepad(std::uint32_t user, std::int16_t right_x, std::uint8_t trigger) noexcept;
 // Pad 0 reports connected from the game's first poll (VR controllers on).
 bool controllers_connected() noexcept;
+void controller_profile_ready() noexcept;
 // The right stick X of a DirectInput gamepad (DualShock 4 / DualSense), read directly
 // (vr_gamepad.cpp); 0 when there is none.
 std::int16_t directinput_right_x() noexcept;
@@ -263,6 +343,7 @@ std::int16_t directinput_right_x() noexcept;
 struct PadPeek {
     std::int16_t right_x = 0;
     std::uint8_t trigger = 0; // the more pressed of the two
+    bool left_click = false, right_click = false;
 };
 PadPeek xinput_peek() noexcept;
 // First person shows the whole skater now (the flip & bail view, grabs).

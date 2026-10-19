@@ -147,6 +147,11 @@ void register_vr_commands(Commands& registry) {
         0.0f, Limits::depth_strength_max);
     real(registry, "vr.tilt_filter", "Seconds of pitch/roll wobble filtering (Level horizon off)",
         &Settings::tilt_filter, 0.0f, Limits::tilt_filter_max);
+    real(registry, "vr.hud_area", "HUD safe area (0.1 smallest, 1 native)", &Settings::hud_area, 0.1f, 1.0f);
+    flag(registry, "vr.late_rotation", "Late rotational reprojection of the eye image", &Settings::late_rotation);
+    flag(registry, "vr.stick_view_switch", "Left stick click switches first/third person", &Settings::stick_view_switch);
+    real(registry, "vr.eye_render_scale", "Eye reconstruction resolution (0.5-1)", &Settings::eye_render_scale, 0.5f, 1.0f);
+    whole(registry, "vr.stereo_steps", "Depth reconstruction search quality (12-48)", &Settings::stereo_steps, 12, 48);
     whole(registry, "vr.view", "0 first person, 1 third person", &Settings::view_mode, 0, Limits::view_mode_max);
     real(registry, "vr.vignette", "Comfort vignette: edges darken while the view turns without your head (0 off, 1 strong)",
         &Settings::comfort_vignette, 0.0f, Limits::comfort_vignette_max);
@@ -173,7 +178,7 @@ void register_vr_commands(Commands& registry) {
     whole(registry, "vr.hide_body_foot", "Hide in first person on foot: 0 head, 1 neck and head, 2 torso (arms kept), 3 waist up, "
         "4 all but the feet (FeetOnly mod)",
         &Settings::hide_body_foot, 0, Limits::hide_body_max);
-    whole(registry, "vr.frame_lag", "Presents between a camera frame and its image (fixes swapped eyes)", &Settings::frame_lag, 0,
+    whole(registry, "vr.frame_lag", "Legacy fallback: presents between a camera frame and its image", &Settings::frame_lag, 0,
         Limits::frame_lag_max);
     real(registry, "vr.theater_distance", "Flat screen distance in metres", &Settings::theater_distance,
         Limits::theater_distance_min, Limits::theater_distance_max);

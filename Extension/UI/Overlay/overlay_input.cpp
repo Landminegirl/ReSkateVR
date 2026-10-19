@@ -3,6 +3,7 @@
 #include "Extension/Boot/exit_watch.h"
 #include "overlay_internal.h"
 #include "input_capture.h"
+#include "Extension/VR/vr.h"
 #include "playstation_input.h"
 #include "cursor.h"
 
@@ -112,6 +113,11 @@ LRESULT CALLBACK window_proc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
     const bool pointer_owned = pointer_message && owns_menu_cursor(s);
     const auto owns_pointer = [&] { return pointer_message ? pointer_owned : owns_menu_cursor(s); };
     if (window == s.window.load()) sync_raw_mouse_registration(owns_pointer());
+    if (message && message == vr_input_ready_message()) {
+        initialize_vr_menu_input(window, previous);
+        return 0;
+    }
+    if (message == WM_NCDESTROY) s.vr_menu_activation.destroyed(reinterpret_cast<std::uintptr_t>(window));
     if (message && message == cursor_sync_message()) {
         window_cursor_input(window, message, wp);
         return 0;
@@ -121,6 +127,43 @@ LRESULT CALLBACK window_proc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
     if (window != s.window.load())
         return previous ? CallWindowProcW(previous, window, message, wp, lp)
                         : DefWindowProcW(window, message, wp, lp);
+    if (s.force_square && (message == WM_SYSCOMMAND || message == WM_GETMINMAXINFO ||
+        message == WM_WINDOWPOSCHANGING || message == WM_SIZING)) {
+        // Keep the native client square as well as the DXGI image. Changing only
+        // the back buffer lets the engine stretch its viewport after a resize.
+        RECT border{};
+        AdjustWindowRectEx(&border, static_cast<DWORD>(GetWindowLongPtrW(window, GWL_STYLE)),
+            GetMenu(window) != nullptr, static_cast<DWORD>(GetWindowLongPtrW(window, GWL_EXSTYLE)));
+        const LONG frame_x = border.right - border.left, frame_y = border.bottom - border.top;
+        if (message == WM_SYSCOMMAND && (wp & 0xfff0) == SC_MAXIMIZE) return 0;
+        if (message == WM_GETMINMAXINFO && lp) {
+            const auto result = previous ? CallWindowProcW(previous, window, message, wp, lp)
+                                         : DefWindowProcW(window, message, wp, lp);
+            auto& bounds = *reinterpret_cast<MINMAXINFO*>(lp);
+            bounds.ptMinTrackSize = {320 + frame_x, 320 + frame_y};
+            bounds.ptMaxTrackSize = {16384 + frame_x, 16384 + frame_y};
+            return result;
+        }
+        if (message == WM_WINDOWPOSCHANGING && lp) {
+            auto& pos = *reinterpret_cast<WINDOWPOS*>(lp);
+            if (!(pos.flags & SWP_NOSIZE) && pos.cx > frame_x && pos.cy > frame_y) {
+                const LONG side = std::clamp(std::min(pos.cx - frame_x, pos.cy - frame_y), 320L, 16384L);
+                pos.cx = side + frame_x;
+                pos.cy = side + frame_y;
+            }
+        }
+        if (message == WM_SIZING && lp) {
+            auto& rect = *reinterpret_cast<RECT*>(lp);
+            const LONG requested = wp == WMSZ_TOP || wp == WMSZ_BOTTOM
+                ? rect.bottom - rect.top - frame_y : rect.right - rect.left - frame_x;
+            const LONG side = std::clamp(requested, 320L, 16384L);
+            if (wp == WMSZ_LEFT || wp == WMSZ_TOPLEFT || wp == WMSZ_BOTTOMLEFT) rect.left = rect.right - side - frame_x;
+            else rect.right = rect.left + side + frame_x;
+            if (wp == WMSZ_TOP || wp == WMSZ_TOPLEFT || wp == WMSZ_TOPRIGHT) rect.top = rect.bottom - side - frame_y;
+            else rect.bottom = rect.top + side + frame_y;
+            return TRUE;
+        }
+    }
     // The player closing the game: it is ended if it does not finish by itself.
     dingosdk::exit_watch::note_window_message(window, message, wp);
     struct ReleaseOnOpen {
@@ -143,7 +186,10 @@ LRESULT CALLBACK window_proc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
     if (!s.stop.load() && s.input_attached.load()) {
         if (message == WM_INPUT && note_raw_mouse(reinterpret_cast<HRAWINPUT>(lp), pointer_owned))
             noted_raw_input = reinterpret_cast<HRAWINPUT>(lp);
-        if (message == WM_KILLFOCUS) s.raw_mouse_buttons.store(0);
+        if (message == WM_KILLFOCUS) {
+            s.raw_mouse_buttons.store(0);
+            dingosdk::vr::cancel_menu_pointer();
+        }
         if (pointer_message) window_cursor_input(window, message, wp, pointer_owned);
         else window_cursor_input(window, message, wp);
         const bool key = message == WM_KEYDOWN || message == WM_SYSKEYDOWN;

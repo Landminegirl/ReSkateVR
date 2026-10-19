@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdint>
 #include <limits>
 #include <numbers>
 #include <optional>
@@ -18,10 +19,120 @@ using first_person::Matrix;
 using first_person::Quat;
 using first_person::Vec3;
 
+// Release-triggered click allows the existing both-sticks recenter chord to cancel it.
+struct StickViewSwitch {
+    bool ready = false, held = false, candidate = false;
+    bool sample(bool active, bool left, bool right) noexcept {
+        if (!active) { ready = held = candidate = false; return false; }
+        if (!ready) { ready = true; held = left; candidate = false; return false; }
+        if (left && !held) candidate = !right;
+        if (right) candidate = false;
+        const bool toggle = !left && held && candidate;
+        held = left;
+        if (!left) candidate = false;
+        return toggle;
+    }
+};
+// A hold fires once at the threshold; release fires a short press only if not held.
+struct MenuPress {
+    bool ready = false, down = false, held = false;
+    double since = 0;
+    enum class Action { none, short_press, long_press };
+    Action sample(bool active, bool pressed, double now) noexcept {
+        if (!active) { ready = down = held = false; return Action::none; }
+        if (!ready) { ready = true; down = pressed; held = pressed; return Action::none; }
+        if (pressed && !down) { since = now; held = false; }
+        auto action = Action::none;
+        if (pressed && !held && now - since >= 0.6) { held = true; action = Action::long_press; }
+        if (!pressed && down && !held) action = now - since >= 0.6 ? Action::long_press : Action::short_press;
+        down = pressed;
+        return action;
+    }
+};
+struct PressEdge {
+    bool ready = false, down = false;
+    bool sample(bool active, bool pressed) noexcept {
+        if (!active) { ready = down = false; return false; }
+        if (!ready) { ready = true; down = pressed; return false; }
+        const bool result = pressed && !down;
+        down = pressed;
+        return result;
+    }
+};
+// Click only after a released trigger has been seen in this UI context. Losing
+// tracking or leaving the panel releases a drag and requires a new press.
+struct PointerClick {
+    bool armed = false, down = false;
+    bool sample(bool active, bool pressed) noexcept {
+        if (!active) { armed = down = false; return false; }
+        if (!pressed) { armed = true; down = false; }
+        else down = armed;
+        return down;
+    }
+};
+// Insets compose with the game's existing safe area; 100% is exactly unchanged.
+inline std::array<float, 4> hud_margins(const std::array<float, 4>& native, float area) {
+    area = std::clamp(area, 0.1f, 1.0f);
+    if (area == 1.0f) return native;
+    auto result = native;
+    for (auto& edge : result) edge = 0.5f - (0.5f - edge) * area;
+    return result;
+}
+// Wheel notches per frame: dead zone removes stick drift; cap stalled-frame jumps.
+inline float menu_wheel(float stick_y, float elapsed) {
+    if (!std::isfinite(stick_y) || !std::isfinite(elapsed)) return 0;
+    const float magnitude = std::clamp((std::abs(stick_y) - .25f) / .75f, 0.0f, 1.0f);
+    return std::copysign(magnitude, stick_y) * 6.0f * std::clamp(elapsed, 0.0f, .05f);
+}
+inline bool panel_uv_valid(float u, float v) {
+    return std::isfinite(u) && std::isfinite(v) && u >= 0 && u <= 1 && v >= 0 && v <= 1;
+}
+inline std::uint32_t eye_extent(std::uint32_t source, float scale) {
+    return std::max(1u, static_cast<std::uint32_t>(std::lround(source * std::clamp(scale, 0.5f, 1.0f))));
+}
+
 struct Pose {
     Quat orientation{0, 0, 0, 1};
     Vec3 position{};
 };
+
+struct PanelHit {
+    float u = 0, v = 0, distance = 0;
+    Vec3 point{};
+};
+inline std::optional<PanelHit> ray_panel(const Pose& aim, const Pose& panel, float width, float height) {
+    if (!(width > 0) || !(height > 0)) return std::nullopt;
+    const auto inverse = first_person::conjugate(panel.orientation);
+    const auto origin = first_person::rotate(inverse, first_person::subtract(aim.position, panel.position));
+    const auto direction = first_person::rotate(inverse, first_person::rotate(aim.orientation, {0,0,-1}));
+    if (!std::isfinite(direction[2]) || direction[2] >= -0.00001f || origin[2] < 0) return std::nullopt;
+    const float distance = -origin[2] / direction[2];
+    const float u = .5f + (origin[0] + direction[0] * distance) / width;
+    const float v = .5f - (origin[1] + direction[1] * distance) / height;
+    if (!std::isfinite(u) || !std::isfinite(v) || distance < 0 || distance > 50 || u < 0 || u > 1 || v < 0 || v > 1)
+        return std::nullopt;
+    auto point = aim.position;
+    const auto forward = first_person::rotate(aim.orientation, {0,0,-1});
+    for (unsigned i = 0; i < 3; ++i) point[i] += forward[i] * distance;
+    return PanelHit{u, v, distance, point};
+}
+inline std::optional<Pose> beam_pose(const Vec3& start, const Vec3& end, const Vec3& viewer) {
+    const auto delta = first_person::subtract(end, start);
+    const float length = first_person::length(delta);
+    if (!std::isfinite(length) || length < .001f) return std::nullopt;
+    Vec3 up{}, centre{};
+    for (unsigned i = 0; i < 3; ++i) { up[i] = delta[i] / length; centre[i] = (start[i] + end[i]) * .5f; }
+    const auto cross = [](const Vec3& a, const Vec3& b) { return Vec3{a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]}; };
+    auto right = cross(up, first_person::subtract(viewer, centre));
+    if (first_person::length(right) < .0001f) right = cross(up, {0,1,0});
+    if (first_person::length(right) < .0001f) right = cross(up, {1,0,0});
+    const float right_length = first_person::length(right);
+    for (auto& v : right) v /= right_length;
+    const auto normal = cross(right, up);
+    Matrix matrix{};
+    for (unsigned i = 0; i < 3; ++i) { matrix[i] = right[i]; matrix[4+i] = up[i]; matrix[8+i] = normal[i]; }
+    return Pose{first_person::orientation(matrix), centre};
+}
 
 // Where "straight ahead" is in the tracking space, set by recentering.
 struct Anchor {
@@ -184,6 +295,37 @@ inline Quat steady_tilt(TiltRig& rig, const Quat& head, float elapsed, float sec
     return rig.value = first_person::normalized(mixed);
 }
 
+// Calibrate the root's facing once from the torso, then ignore torso animation.
+struct PlayerHeading {
+    bool ready = false;
+    float offset = 0, value = 0;
+};
+inline float player_heading(PlayerHeading& rig, float trajectory, float chest) {
+    if (!rig.ready && std::isfinite(chest)) {
+        rig.value = wrap(chest);
+        if (std::isfinite(trajectory)) {
+            rig.offset = wrap(chest - trajectory);
+            rig.ready = true;
+        }
+    }
+    if (rig.ready && std::isfinite(trajectory)) rig.value = wrap(trajectory + rig.offset);
+    return rig.value;
+}
+
+// A rigid player eye origin: sample the avatar's eye once, then follow locomotion.
+// HMD rotation/translation are composed separately, never filtered through animation.
+struct HeadOrigin {
+    bool ready = false;
+    Vec3 local{};
+};
+inline Vec3 head_origin(HeadOrigin& rig, const Vec3& native_eye, const Vec3& body, float body_heading) {
+    if (!rig.ready) {
+        rig.local = first_person::rotate(yaw(-body_heading), first_person::subtract(native_eye, body));
+        rig.ready = true;
+    }
+    return first_person::add(body, first_person::rotate(yaw(body_heading), rig.local));
+}
+
 inline Anchor anchor_from(const Pose& head) { return {heading(head.orientation), head.position}; }
 
 // The camera for one eye: `base` is the skater's head camera; `eye` and
@@ -205,6 +347,27 @@ inline Matrix compose(const Matrix& base, float base_heading, bool level, const 
     first_person::write(result, first_person::normalized(first_person::multiply(turn, relative)),
         {base[12] + moved[0], base[13] + moved[1], base[14] + moved[2]});
     return result;
+}
+
+// Convert the renderer's actual world orientation through the same rig-to-tracking
+// transform as the issued camera. This includes engine interpolation of HMD motion.
+inline Quat rendered_tracking_orientation(const Matrix& issued_world, const Quat& issued_tracking, const Matrix& rendered_world) {
+    return first_person::normalized(first_person::multiply(issued_tracking,
+        first_person::multiply(first_person::conjugate(first_person::orientation(issued_world)),
+            first_person::orientation(rendered_world))));
+}
+struct DepthFramePairing {
+    std::uint64_t color_present = 0;
+    bool pending = false, ready = false;
+    void keep(std::uint64_t present) { color_present = present; pending = true; ready = false; }
+    bool accepts(std::uint64_t copied_present) const { return pending && copied_present == color_present; }
+    void complete() { pending = false; ready = true; }
+};
+using RotationBasis = std::array<Vec3, 3>;
+inline RotationBasis late_rotation_basis(const Quat& source, const Quat& target) {
+    const auto rotation = first_person::normalized(first_person::multiply(first_person::conjugate(source), target));
+    return {first_person::rotate(rotation, {1, 0, 0}), first_person::rotate(rotation, {0, 1, 0}),
+        first_person::rotate(rotation, {0, 0, 1})};
 }
 
 // Field-of-view tangents: left and down are negative.
@@ -237,6 +400,21 @@ inline float native_fov_degrees(float tangent, float aspect, bool vertical) {
 struct Angles {
     float left = 0, right = 0, up = 0, down = 0;
 };
+
+// Affine UV transform from an OpenXR eye into a symmetric source image.
+struct EyeUvMapping {
+    float u_scale = 1, v_scale = 1, u_bias = 0, v_bias = 0;
+};
+inline std::optional<EyeUvMapping> eye_uv_mapping(const Angles& source, const Angles& eye) {
+    const float h = std::tan(source.right), v = std::tan(source.up);
+    const float l = std::tan(eye.left), r = std::tan(eye.right);
+    const float u = std::tan(eye.up), d = std::tan(eye.down);
+    if (!std::isfinite(h) || !std::isfinite(v) || h <= 0.01f || v <= 0.01f ||
+        !std::isfinite(l) || !std::isfinite(r) || !std::isfinite(u) || !std::isfinite(d) ||
+        l >= r || d >= u) return std::nullopt;
+    return EyeUvMapping{(r - l) / (2 * h), (u - d) / (2 * v),
+                        0.5f + l / (2 * h), 0.5f - u / (2 * v)};
+}
 
 // The frustum actually rendered.
 inline Angles layer_angles(float tangent, float aspect) {

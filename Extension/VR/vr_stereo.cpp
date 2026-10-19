@@ -15,7 +15,12 @@ constexpr char shader_source[] = R"(
 Texture2D color : register(t0);
 Texture2D<float> depth : register(t1);
 SamplerState linear_clamp : register(s0);
-cbuffer Constants : register(b0) { uint mode; float side; float scale; float max_shift; float vignette; };
+cbuffer Constants : register(b0) {
+    uint mode; float side; float scale; float max_shift; float vignette;
+    float u_scale; float v_scale; float u_bias; float v_bias; uint search_steps;
+    float source_horizontal; float source_vertical;
+    float4 rotation_x; float4 rotation_y; float4 rotation_z;
+};
 struct Vertex { float4 position : SV_Position; float2 uv : TEXCOORD0; };
 Vertex vs_main(uint id : SV_VertexID) {
     Vertex v;
@@ -56,7 +61,7 @@ float ps_dilate(Vertex v) : SV_Target {
             nearest = max(nearest, depth.Load(int3(clamp(p + int2(dx, dy), int2(0, 0), int2(size) - 1), 0)));
     return nearest;
 }
-static const int steps = 48;
+// Ray search quality is adjustable; image projection and separation stay unchanged.
 // Comfort vignette: darkens towards the edges by `amount` (0 none, 1 a narrow window). The
 // image is rendered wider than the lenses show, so it starts well inside the image edge.
 float3 comfort(float3 c, float2 uv, float amount) {
@@ -66,24 +71,38 @@ float3 comfort(float3 c, float2 uv, float amount) {
     return c * (1 - smoothstep(inner, inner + 0.35, r));
 }
 float4 ps_main(Vertex v) : SV_Target {
-    float x = v.uv.x;
+    // The OpenXR eye frustum can be asymmetric (not centred at 0).
+    // Preserve actual headset rays before the depth-based parallax shift.
+    float2 scene_uv = v.uv * float2(u_scale, v_scale) + float2(u_bias, v_bias);
+    // Late rotational reprojection: target-eye rays expressed in the source camera.
+    // The compositor receives the target orientation only after these pixels are warped.
+    float3 ray = float3((scene_uv.x - 0.5) * 2 * source_horizontal,
+        (0.5 - scene_uv.y) * 2 * source_vertical, -1);
+    ray = ray.x * rotation_x.xyz + ray.y * rotation_y.xyz + ray.z * rotation_z.xyz;
+    if (ray.z >= -0.0001) return float4(0, 0, 0, 1);
+    scene_uv = float2(0.5 + ray.x / (-2 * ray.z * source_horizontal),
+        0.5 - ray.y / (-2 * ray.z * source_vertical));
+    // A fast turn can expose rays the original frame never rendered. Avoid edge smearing.
+    if (any(scene_uv < 0) || any(scene_uv > 1)) return float4(0, 0, 0, 1);
+    float x = scene_uv.x;
     uint decode = mode & 0xff;
     bool background_fill = (mode & 0x100) != 0;
     if (scale > 0 && max_shift > 0) {
         float2 size;
         depth.GetDimensions(size.x, size.y);
+        int steps = clamp(int(search_steps), 12, 48);
         float step_size = max_shift / steps;
-        float previous_t = max_shift, previous_f = shift_at(float2(v.uv.x - side * max_shift, v.uv.y), size) - max_shift;
-        float far_shift = previous_f + max_shift, far_x = v.uv.x - side * max_shift;
+        float previous_t = max_shift, previous_f = shift_at(float2(scene_uv.x - side * max_shift, scene_uv.y), size) - max_shift;
+        float far_shift = previous_f + max_shift, far_x = scene_uv.x - side * max_shift;
         [loop] for (int i = steps - 1; i >= 0; --i) {
             float t = step_size * i;
-            float sx = v.uv.x - side * t;
-            float s = shift_at(float2(sx, v.uv.y), size);
+            float sx = scene_uv.x - side * t;
+            float s = shift_at(float2(sx, scene_uv.y), size);
             float f = s - t;
             if (f >= 0) {
                 bool hole = previous_f < -2 * step_size && f > 2 * step_size;
                 float crossing = previous_f < 0 ? t + (previous_t - t) * f / max(f - previous_f, 1e-6) : t;
-                x = hole && background_fill ? far_x : v.uv.x - side * crossing;
+                x = hole && background_fill ? far_x : scene_uv.x - side * crossing;
                 break;
             }
             if (s < far_shift) { far_shift = s; far_x = sx; }
@@ -91,7 +110,7 @@ float4 ps_main(Vertex v) : SV_Target {
             previous_f = f;
         }
     }
-    float3 c = saturate(color.SampleLevel(linear_clamp, float2(x, v.uv.y), 0).rgb);
+    float3 c = saturate(color.SampleLevel(linear_clamp, float2(x, scene_uv.y), 0).rgb);
     if (decode == 0) c = srgb_to_linear(c);
     return float4(comfort(c, v.uv, vignette), 1);
 }
@@ -140,7 +159,7 @@ bool DepthStereo::create(ID3D12Device* device, std::string& error) {
     parameters[0].DescriptorTable = {1, &range};
     parameters[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
     parameters[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
-    parameters[1].Constants = {0, 0, 5};
+    parameters[1].Constants = {0, 0, 24};
     parameters[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
     D3D12_STATIC_SAMPLER_DESC sampler{};
     sampler.Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
@@ -414,11 +433,19 @@ bool DepthStereo::render(ID3D12CommandQueue* queue, const std::array<ID3D12Resou
         device_->CreateRenderTargetView(targets[eye], &target_view, rtv);
         // Left eye (+1): near points move right in its image; right eye (-1): left.
         const float side = eye == 0 ? 1.0f : -1.0f;
-        std::array<UINT, 5> constants{mode, 0, 0, 0, 0};
+        std::array<UINT, 24> constants{mode, 0, 0, 0, 0, 0, 0, 0, 0, std::clamp(params.steps, 12u, 48u)};
+        std::memcpy(&constants[10], &params.source_horizontal, sizeof(float));
+        std::memcpy(&constants[11], &params.source_vertical, sizeof(float));
+        for (std::size_t axis = 0; axis < 3; ++axis)
+            std::memcpy(&constants[12 + axis * 4], params.rotation[eye][axis].data(), sizeof(float) * 3);
         std::memcpy(&constants[1], &side, sizeof(float));
         std::memcpy(&constants[2], &params.scale, sizeof(float));
         std::memcpy(&constants[3], &params.max_shift, sizeof(float));
         std::memcpy(&constants[4], &params.vignette, sizeof(float));
+        std::memcpy(&constants[5], &params.u_scale[eye], sizeof(float));
+        std::memcpy(&constants[6], &params.v_scale[eye], sizeof(float));
+        std::memcpy(&constants[7], &params.u_bias[eye], sizeof(float));
+        std::memcpy(&constants[8], &params.v_bias[eye], sizeof(float));
         list_->SetGraphicsRoot32BitConstants(1, static_cast<UINT>(constants.size()), constants.data(), 0);
         const auto desc = targets[eye]->GetDesc();
         const D3D12_VIEWPORT viewport{0, 0, static_cast<float>(desc.Width), static_cast<float>(desc.Height), 0, 1};

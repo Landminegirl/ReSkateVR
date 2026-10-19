@@ -1,4 +1,5 @@
 #include "voice_chat.h"
+#include "Extension/VR/vr.h"
 #include "native_voice.h"
 #include "Engine/Core/Platform/launcher_support.h"
 #include "Engine/Game/Input/voice_input.h"
@@ -192,6 +193,8 @@ struct VoiceChat::Impl {
         SteamVoice steam;
         Playback playback(native);
         VoicePushToTalk push_to_talk;
+        vr::controls::TalkGate talk_gate;
+        bool talk_was = false;
         bool recording{}, draining{}, forward_tail{};
         std::uint64_t current_generation{};
         Clock::time_point retry{};
@@ -216,14 +219,23 @@ struct VoiceChat::Impl {
                 now - refreshed < std::chrono::milliseconds(300);
             const bool foreground = focused();
             const bool can_transmit = active && foreground && !current.peers.empty();
-            if (revision != current_generation) push_to_talk = {};
+            if (revision != current_generation) { push_to_talk = {}; talk_gate = {}; }
             ControllerInput controller;
             if (can_transmit && !settings.open_mic && settings.controller_combo)
                 DingoSDKOverlayReadControllerInput(&controller);
             const bool held = push_to_talk.update(settings,
                 can_transmit && settings.push_to_talk && (GetAsyncKeyState(settings.push_to_talk) & 0x8000) != 0,
                 controller, !can_transmit || settings.open_mic);
-            const bool wanted = can_transmit && (settings.open_mic || held) && settings.microphone > 0.f;
+            const auto vr_options = vr::settings();
+            const auto vr_pad = vr::controller_pad();
+            const bool talking = talk_gate.update(can_transmit && !settings.open_mic && settings.microphone > 0.f,
+                held || (vr_pad.active && vr_pad.voice_down), vr_options.enabled && vr_options.voice_toggle,
+                vr_pad.binding_revision ^ (static_cast<std::uint64_t>(controller.device) << 32));
+            if (vr_options.enabled && vr_options.voice_toggle && talking != talk_was)
+                overlay::notify(overlay::NoticeLevel::info, talking ? "Voice: talk enabled" : "Voice: talk stopped",
+                    talking ? "Press your talk binding again to stop. Capture still depends on voice readiness." : "");
+            talk_was = talking;
+            const bool wanted = can_transmit && (settings.open_mic || talking) && settings.microphone > 0.f;
             const auto player_gain = [&](std::uint64_t id) {
                 const auto found = gains.find(id);
                 return found == gains.end() ? 1.f : found->second;

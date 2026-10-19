@@ -1,9 +1,12 @@
 #include "overlay_internal.h"
+#include "Engine/Core/Log/logging.h"
 #include "chat_emotes.h"
+#include "vr_chat_widgets.h"
 #include "chat_rich.h"
 #include "nametag_gradient.h"
 #include "role_badge.h"
 #include "Extension/VR/vr.h"
+#include "Extension/VR/vr_chat_text.h"
 #include <imgui_internal.h>
 #include <optional>
 
@@ -41,6 +44,8 @@ struct ChatState {
     std::string typing_seen;
     Clock::time_point typing_changed{}, typing_sent{};
     bool scroll_to_bottom{};
+    bool keyboard = false, shift = false, symbols = false;
+    std::string send_status;
     std::vector<std::string> completions; // "/" commands the typed text can still become
     std::uint64_t completions_version{};  // the Suggestions::version `completions` was copied from
     // What the text in the box can become (suggestions()): worked out again only when that text,
@@ -337,7 +342,7 @@ bool chat_pending() {
         }
         s.chat_available.store(c.feed.available);
         // Leaving the session closes an open chat box.
-        if (!c.feed.available) s.chat_visible.store(false);
+        if (!(s.vr_chat_open ? c.feed.session_available : c.feed.available)) s.chat_visible.store(false);
         for (const auto& line : c.feed.lines)
             if (line.sequence > c.seen) {
                 c.arrivals.emplace_back(line.sequence, now);
@@ -346,7 +351,14 @@ bool chat_pending() {
         c.seen = std::max(c.seen, c.feed.latest);
         while (c.arrivals.size() > multiplayer_chat_history) c.arrivals.pop_front();
     }
-    note_typing(c, s.chat_visible.load() && c.feed.available);
+    if (!s.chat_visible.load() || !dingosdk::vr::settings().enabled) {
+        s.vr_chat_open = false;
+        c.keyboard = false;
+    }
+    dingosdk::vr::set_chat_keyboard_open(s.vr_chat_open);
+    note_typing(c, s.chat_visible.load() && (s.vr_chat_open ? c.feed.session_available : c.feed.available));
+    // Keep the chat shortcut visible below native pause and ReSkate menus even with an empty log.
+    if (dingosdk::vr::settings().enabled && dingosdk::vr::game_menu_open()) return true;
     if (s.chat_visible.load()) return true;
     if (!c.feed.available) return false;
     if (c.feed.vote.id || c.feed.announcement.id) return true; // the vote and announcement cards
@@ -738,19 +750,102 @@ void draw_vote(const MultiplayerVote& vote, ImFont* heading, ImFont* body, ImVec
     button(left + button_width + gap, false, vote.no_bind);
 }
 
+namespace {
+void vr_chat_shortcut(State& s, ChatState& c, ImVec2 display) {
+    dingosdk::vr::set_chat_shortcut_region(0, 0, 0, 0);
+    if (!dingosdk::vr::settings().enabled || s.chat_visible.load() ||
+        (!s.visible.load() && !dingosdk::vr::game_menu_open()) || s.console_visible.load() || s.editor_visible.load()) return;
+    ImGui::SetNextWindowPos(ImVec2(display.x * .5f, display.y * .94f), ImGuiCond_Always, ImVec2(.5f, 1));
+    constexpr auto flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
+        ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoMove;
+    ImGui::Begin("##vr_chat_shortcut", nullptr, flags);
+    ImGui::SetWindowFontScale(std::clamp(display.y / 1080.0f, 0.75f, 2.0f));
+    const auto shortcut = vr_chat_button(c.feed.session_available, display);
+    if (shortcut.clicked) {
+        s.vr_chat_open = true;
+        s.chat_visible.store(true);
+        s.chat_focus_requested.store(true);
+        c.keyboard = true;
+        c.scroll_to_bottom = true;
+        c.send_status.clear();
+        dingosdk::vr::set_chat_keyboard_open(true);
+        dingosdk::logging::write(dingosdk::logging::Level::info, dingosdk::logging::Channel::input, "VR session chat opened from menu.");
+    }
+    const auto lo = shortcut.low, hi = shortcut.high;
+    if (display.x > 0 && display.y > 0)
+        dingosdk::vr::set_chat_shortcut_region(lo.x / display.x, lo.y / display.y, hi.x / display.x, hi.y / display.y);
+    ImGui::End();
+}
+void vr_chat_keyboard(ChatState& c) {
+    const float gap = ImGui::GetStyle().ItemSpacing.x;
+    const float width = (ImGui::GetContentRegionAvail().x - gap * 9) / 10;
+    const float height = ImGui::GetFrameHeight();
+    const auto key = [&](const char* label, std::string_view value, float key_width) {
+        if (!ImGui::Button(label, ImVec2(key_width, height))) return;
+        if (!dingosdk::vr::chat_text::append(c.input.data(), c.input.size(), value)) c.send_status = "Message limit reached (200 bytes).";
+        else c.send_status.clear();
+        c.cursor_to_end = true;
+        c.refocus_input = true;
+    };
+    const std::array<std::string_view, 4> letters{"1234567890", "qwertyuiop", "asdfghjkl", "zxcvbnm"};
+    const std::array<std::string_view, 4> punctuation{"!@#$%^&*()", "[]{}<>/\\=+", "-_:;\"'`~", ",.?|"};
+    for (std::size_t row = 0; row < letters.size(); ++row) {
+        const auto keys = c.symbols ? punctuation[row] : letters[row];
+        for (std::size_t i = 0; i < keys.size(); ++i) {
+            if (i) ImGui::SameLine();
+            char value = keys[i];
+            if (c.shift && value >= 'a' && value <= 'z') value = static_cast<char>(value - 'a' + 'A');
+            const char text[]{value, 0};
+            ImGui::PushID(static_cast<int>(row * 20 + i));
+            key(text, std::string_view(text, 1), width);
+            ImGui::PopID();
+        }
+    }
+    if (ImGui::Button(c.shift ? "SHIFT ON" : "Shift", ImVec2(width * 1.5f, height))) c.shift = !c.shift;
+    ImGui::SameLine();
+    if (ImGui::Button(c.symbols ? "ABC" : "Symbols", ImVec2(width * 1.5f, height))) c.symbols = !c.symbols;
+    ImGui::SameLine();
+    key("Space", " ", width * 3);
+    ImGui::SameLine();
+    if (ImGui::Button("Backspace", ImVec2(width * 2, height))) {
+        dingosdk::vr::chat_text::backspace(c.input.data());
+        c.cursor_to_end = c.refocus_input = true;
+        c.send_status.clear();
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Clear", ImVec2(0, height))) { c.input.fill(0); c.refocus_input = true; }
+}
+bool send_chat(ChatState& c) {
+    if (!dingosdk::vr::chat_text::sendable(c.input.data())) return false;
+    if (!queue_multiplayer_action("chat", c.input.data())) {
+        c.send_status = "Message could not be queued. Try again.";
+        return false;
+    }
+    c.input.fill(0);
+    c.send_status.clear();
+    c.scroll_to_bottom = true;
+    c.refocus_input = true;
+    return true;
+}
+}
+
 void draw_chat() {
     auto& s = state();
     auto& c = chat();
-    if (!c.feed.available) return;
+    vr_chat_shortcut(s, c, ImGui::GetIO().DisplaySize);
+    if (!(s.vr_chat_open ? c.feed.session_available : c.feed.available)) return;
     auto* heading = s.menu.bold ? s.menu.bold : ImGui::GetFont();
     auto* body = s.menu.body ? s.menu.body : ImGui::GetFont();
     const auto display = ImGui::GetIO().DisplaySize;
-    const float scale = std::clamp(display.y / 1080.0f, 1.0f, 2.0f);
-    const float width = 520.0f * scale, margin = 24.0f * scale;
+    const bool vr_chat = s.vr_chat_open;
+    const float scale = std::clamp(display.y / 1080.0f, vr_chat ? 0.65f : 1.0f, 2.0f);
+    const float width = vr_chat ? std::min(display.x * .9f, 900.0f * scale) : 520.0f * scale;
+    const float margin = 24.0f * scale;
 
     if (s.chat_visible.load()) {
-        ImGui::SetNextWindowPos(ImVec2(display.x - margin, display.y - margin), ImGuiCond_Always, ImVec2(1.0f, 1.0f));
-        ImGui::SetNextWindowSize(ImVec2(width, 320.0f * scale), ImGuiCond_Always);
+        ImGui::SetNextWindowPos(vr_chat ? ImVec2(display.x * .5f, display.y * .5f) : ImVec2(display.x - margin, display.y - margin),
+            ImGuiCond_Always, vr_chat ? ImVec2(.5f, .5f) : ImVec2(1, 1));
+        ImGui::SetNextWindowSize(ImVec2(width, vr_chat ? std::min(display.y * .9f, 760.0f * scale) : 320.0f * scale), ImGuiCond_Always);
         ImGui::PushStyleColor(ImGuiCol_WindowBg, with_alpha(theme::ink, 0.92f));
         ImGui::PushStyleColor(ImGuiCol_Border, with_alpha(theme::blue, 0.9f));
         ImGui::PushStyleColor(ImGuiCol_FrameBg, IM_COL32(12, 12, 12, 255));
@@ -762,7 +857,13 @@ void draw_chat() {
         if (ImGui::Begin("##reskate_chat", nullptr, flags)) {
             ImGui::PushFont(body);
             ImGui::SetWindowFontScale(scale * 0.9f);
-            ImGui::BeginChild("##reskate_chat_lines", ImVec2(0.0f, -ImGui::GetFrameHeightWithSpacing()));
+            if (vr_chat) {
+                ImGui::TextUnformatted("SESSION CHAT");
+                ImGui::SameLine();
+                if (ImGui::SmallButton("Close")) { s.chat_visible.store(false); s.vr_chat_open = false; }
+            }
+            const float reserved = ImGui::GetFrameHeightWithSpacing() * (vr_chat ? (c.keyboard ? 8.0f : 3.0f) : 1.0f);
+            ImGui::BeginChild("##reskate_chat_lines", ImVec2(0.0f, -reserved));
             ImGui::PushTextWrapPos(0.0f);
             auto& layouts = chat_layouts().open;
             for (const auto& line : c.feed.lines) {
@@ -837,15 +938,23 @@ void draw_chat() {
                 c.completions_version = found.version;
             }
             ImGui::SetNextItemWidth(-FLT_MIN);
-            if (ImGui::InputTextWithHint("##reskate_chat_input", "Say something, or / for commands  (Enter sends, Esc closes)",
+            const bool submitted = ImGui::InputTextWithHint("##reskate_chat_input", "Say something, or / for commands  (Enter sends, Esc closes)",
                                          c.input.data(), c.input.size(),
                                          ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_CallbackCompletion |
                                              ImGuiInputTextFlags_CallbackAlways,
-                                         complete_command, &c)) {
-                const std::string text(c.input.data());
-                if (text.find_first_not_of(' ') != std::string::npos) queue_multiplayer_action("chat", text);
-                c.input.fill(0);
-                s.chat_visible.store(false);
+                                         complete_command, &c);
+            if (vr_chat && ImGui::IsItemClicked()) c.keyboard = true;
+            if (submitted && send_chat(c) && !vr_chat) s.chat_visible.store(false);
+            if (vr_chat) {
+                ImGui::BeginDisabled(!dingosdk::vr::chat_text::sendable(c.input.data()));
+                if (ImGui::Button("Send", ImVec2(100 * scale, 0))) (void)send_chat(c);
+                ImGui::EndDisabled();
+                ImGui::SameLine();
+                if (ImGui::Button(c.keyboard ? "Hide keyboard" : "Keyboard")) c.keyboard = !c.keyboard;
+                ImGui::SameLine();
+                ImGui::Text("%zu / %zu bytes", std::strlen(c.input.data()), multiplayer_chat_max_bytes);
+                if (c.keyboard) vr_chat_keyboard(c);
+                if (!c.send_status.empty()) ImGui::TextWrapped("%s", c.send_status.c_str());
             }
             ImGui::PopFont();
         }
@@ -854,8 +963,8 @@ void draw_chat() {
         ImGui::PopStyleVar(2);
         ImGui::PopStyleColor(4);
         const float above = panel_top - 6.0f * scale;
-        draw_command_list(c, heading, body, ImVec2(display.x - margin - width, above), width, scale);
-        emote_picker(c, heading, ImVec2(display.x - margin - width, above), width, scale);
+        if (!vr_chat) draw_command_list(c, heading, body, ImVec2(display.x - margin - width, above), width, scale);
+        if (!vr_chat) emote_picker(c, heading, ImVec2(display.x - margin - width, above), width, scale);
         draw_announcement(c.feed.announcement, heading, body, display, scale);
         draw_vote(c.feed.vote, heading, body, display, scale, true); // the cursor is free while typing
         return;

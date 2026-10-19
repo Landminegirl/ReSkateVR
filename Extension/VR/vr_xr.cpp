@@ -7,6 +7,7 @@
 //                  xrBeginFrame
 #include "vr_blit.h"
 #include "vr_stereo.h"
+#include "vr_pointer_gpu.h"
 #include "vr_internal.h"
 #include "Engine/Core/Log/logging.h"
 #include <algorithm>
@@ -47,7 +48,10 @@ struct Runtime {
     XrEnvironmentBlendMode blend = XR_ENVIRONMENT_BLEND_MODE_OPAQUE;
     DXGI_FORMAT format = DXGI_FORMAT_UNKNOWN;
     std::array<Chain, 2> eyes;
-    Chain screen;
+    Chain screen, pointer_cursor, pointer_beam;
+    PointerPainter pointer_painter;
+    bool screen_open = false, pointer_error_logged = false;
+    std::uint32_t layer_limit = 1;
     Chain chat; // the chat panel (vr.chat_in_vr)
     bool chat_error_logged = false;
     std::array<bool, 2> eye_ready{};
@@ -58,17 +62,25 @@ struct Runtime {
     // Depth stereo renders the previous frame (its colour is kept, its depth copied at
     // the next clear): the camera record of the kept frame, and the latest record.
     std::optional<EyeRecord> kept_record, last_record;
-    bool depth_pending = false; // A frame was kept; its depth arrives with the next clear.
+    math::DepthFramePairing depth_pair;
+    std::uint64_t kept_width = 0;
+    std::uint32_t kept_height = 0;
+    DXGI_FORMAT kept_format = DXGI_FORMAT_UNKNOWN;
+    std::uint64_t depth_misses = 0;
     bool no_depth_logged = false;
     double retry_at = 0;
     std::string last_error;
     // Camera frames collected per present, newest last; the image presented
     // now belongs to the entry `frame_lag` presents back.
-    std::uint64_t collected = 0;
+    std::uint64_t collected = 0, render_collected = 0;
+    bool renderer_pairing = false;
+    std::uint64_t native_pairs = 0, legacy_pairs = 0;
     std::deque<std::optional<EyeRecord>> history;
     math::Anchor screen_anchor;
     std::uint64_t screen_recenter = 0;
     bool key_down = false;
+    math::StickViewSwitch view_switch;
+    math::PressEdge recenter_click;
     double stats_time = 0;
     std::uint64_t stats_presents = 0, stats_camera = 0, presents = 0;
     // New camera frames found per present while the VR camera is active:
@@ -224,6 +236,7 @@ void teardown(const std::string& reason, double retry) {
     auto& s = shared();
     auto& r = runtime();
     s.tracking.store(false, std::memory_order_release);
+    s.native_fov_ready.store(false, std::memory_order_release);
     s.predicted_display_time.store(0, std::memory_order_release);
     end_empty_frame();
     {
@@ -231,13 +244,21 @@ void teardown(const std::string& reason, double retry) {
         s.session = XR_NULL_HANDLE;
         s.local_space = s.view_space = XR_NULL_HANDLE;
     }
+    release_menu_pointer();
+    r.pointer_painter.destroy();
     r.blitter.destroy();
     r.stereo.destroy();
     r.kept_record.reset();
     r.last_record.reset();
-    r.depth_pending = false;
+    r.depth_pair = {};
+    r.kept_width = r.kept_height = 0;
+    r.kept_format = DXGI_FORMAT_UNKNOWN;
     for (auto& eye : r.eyes) destroy_chain(eye);
     destroy_chain(r.screen);
+    destroy_chain(r.pointer_cursor);
+    destroy_chain(r.pointer_beam);
+    r.screen_open = false;
+    r.pointer_error_logged = false;
     destroy_chain(r.chat);
     if (r.view) s.xr.destroy_space(r.view);
     if (r.local) s.xr.destroy_space(r.local);
@@ -258,6 +279,10 @@ void teardown(const std::string& reason, double retry) {
     {
         std::lock_guard lock(s.records_mutex);
         s.records.clear();
+        s.issued.clear();
+        s.rendered.reset();
+        r.renderer_pairing = false;
+        r.render_collected = 0;
     }
     if (!reason.empty()) log_info(reason);
     update_status([&](Status& st) {
@@ -313,6 +338,7 @@ bool start(ID3D12CommandQueue* queue, std::string& error) {
     if (!check(found, "Finding the headset", error)) return false;
     XrSystemProperties properties{XR_TYPE_SYSTEM_PROPERTIES};
     (void)x.get_system_properties(r.instance, r.system, &properties);
+    r.layer_limit = std::max(1u, properties.graphicsProperties.maxLayerCount);
     std::array<XrViewConfigurationView, 2> views{XrViewConfigurationView{XR_TYPE_VIEW_CONFIGURATION_VIEW},
         XrViewConfigurationView{XR_TYPE_VIEW_CONFIGURATION_VIEW}};
     if (!check(x.enumerate_view_configuration_views(r.instance, r.system, XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO, 2, &count,
@@ -444,7 +470,7 @@ bool ensure_chain(Chain& chain, std::uint32_t width, std::uint32_t height, std::
     auto& x = shared().xr;
     if (chain.handle && chain.width == width && chain.height == height) return true;
     if (chain.handle) {
-        if (!r.blitter.wait_idle(2000)) { error = "The GPU did not finish copying to the headset."; return false; }
+        if (!r.blitter.wait_idle(2000) || !r.stereo.wait_idle(2000) || !r.pointer_painter.wait_idle(2000)) { error = "The GPU did not finish copying to the headset."; return false; }
         destroy_chain(chain);
     }
     XrSwapchainCreateInfo create{XR_TYPE_SWAPCHAIN_CREATE_INFO};
@@ -571,12 +597,14 @@ void publish_rates(double now) {
         }
         log_info(std::format("stats: state {}, headset {:.0f} Hz, presents {:.1f}/s, camera frames {:.1f}/s, "
             "pairing none/one/more {}/{}/{}, eye images {}, repeats {}, frames {}, {}, image {}x{} format {}, render FOV {:.1f}, "
-            "frame lag {}, camera thread {}, present thread {}",
+            "frame lag {}, camera thread {}, present thread {}, eye reconstruction {}x{} / {} samples, pose pairing {}, native/legacy {}/{}, render observations {}, late rotation {}, depth pair misses {}, source coverage {:.1f}%/eye, headset pacing {}, efficient framing {}",
             snapshot.state, period > 0 ? 1e9 / static_cast<double>(period) : 0.0, present_hz, camera_hz,
             r.pairing[0], r.pairing[1], r.pairing[2], snapshot.eye_images, snapshot.repeated_images, snapshot.frames_submitted,
             camera_active(now) ? "VR camera" : snapshot.theater_active ? "flat screen" : "idle",
             snapshot.image_width, snapshot.image_height, r.image_format, fov, current_settings().frame_lag, camera_thread,
-            GetCurrentThreadId()));
+            GetCurrentThreadId(), r.eyes[0].width, r.eyes[0].height, current_settings().stereo_steps,
+            r.renderer_pairing ? "renderer" : "legacy", r.native_pairs, r.legacy_pairs,
+            s.rendered_frames.load(std::memory_order_relaxed), current_settings().late_rotation, r.depth_misses, snapshot.source_coverage, current_settings().headset_pacing, current_settings().efficient_fov));
         r.pairing = {};
     }
     update_status([&](Status& st) {
@@ -598,7 +626,7 @@ ChatPanel& chat_panel() {
     static ChatPanel value;
     return value;
 }
-std::atomic<bool> chat_wanted{false};
+std::atomic<bool> chat_wanted{false}, chat_keyboard_open{false};
 
 // The chat as a quad on the left controller (above the wrist, tilted towards the eyes), or at
 // the lower left of the view. Opaque: the overlay draws it on its own dark background.
@@ -653,13 +681,79 @@ bool chat_layer(const Settings& options, XrCompositionLayerQuad& quad, std::stri
     return true;
 }
 
+bool paint_pointer_chain(Chain& chain, bool cursor, bool pressed, std::string& error) {
+    auto& r = runtime();
+    auto& x = shared().xr;
+    const std::uint32_t size = cursor ? 32 : 1;
+    if (!ensure_chain(chain, size, size, error)) return false;
+    XrSwapchainImageAcquireInfo acquire{XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO};
+    std::uint32_t index = 0;
+    if (!check(x.acquire_swapchain_image(chain.handle, &acquire, &index), "Acquiring pointer image", error)) return false;
+    XrSwapchainImageWaitInfo wait{XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO};
+    wait.timeout = XR_INFINITE_DURATION;
+    if (!check(x.wait_swapchain_image(chain.handle, &wait), "Waiting for pointer image", error)) return false;
+    const bool painted = index < chain.images.size() && r.pointer_painter.paint(r.queue.Get(), chain.images[index], r.format, cursor, pressed, error);
+    XrSwapchainImageReleaseInfo release{XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
+    const auto released = x.release_swapchain_image(chain.handle, &release);
+    return painted && check(released, "Releasing pointer image", error);
+}
+void pointer_quad(XrCompositionLayerQuad& quad, const Chain& chain, const math::Pose& pose, float width, float height) {
+    auto& r = runtime();
+    quad = {XR_TYPE_COMPOSITION_LAYER_QUAD};
+    quad.space = r.local;
+    quad.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
+    quad.eyeVisibility = XR_EYE_VISIBILITY_BOTH;
+    quad.subImage.swapchain = chain.handle;
+    quad.subImage.imageRect = {{0,0},{static_cast<std::int32_t>(chain.width),static_cast<std::int32_t>(chain.height)}};
+    quad.pose = to_xr(pose);
+    quad.size = {width,height};
+}
+void menu_pointer_layers(IDXGISwapChain3* chain, const XrCompositionLayerQuad& panel,
+    std::vector<XrCompositionLayerBaseHeader*>& layers, XrCompositionLayerQuad& beam, XrCompositionLayerQuad& cursor) {
+    auto& r = runtime();
+    auto& s = shared();
+    math::Pose aim;
+    bool trigger = false;
+    const bool overlay = s.ui_open.load(std::memory_order_acquire);
+    const bool menu = overlay || s.game_menu.load(std::memory_order_acquire);
+    if (!menu || r.state != XR_SESSION_STATE_FOCUSED || (!current_settings().controllers || !current_settings().menu_pointer) ||
+        !right_aim_pose(r.local, r.frame.predictedDisplayTime, aim, trigger)) { release_menu_pointer(); return; }
+    const auto panel_pose = to_pose(panel.pose);
+    const auto hit = math::ray_panel(aim, panel_pose, panel.size.width, panel.size.height);
+    HWND window = nullptr;
+    (void)chain->GetHwnd(&window);
+    publish_menu_pointer(window, true, hit, trigger, overlay);
+    if (r.pointer_error_logged) return; // Optional graphics failure must not disrupt the menu.
+    XrSpaceLocation location{XR_TYPE_SPACE_LOCATION};
+    if (XR_FAILED(s.xr.locate_space(r.view, r.local, r.frame.predictedDisplayTime, &location)) ||
+        !(location.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT)) return;
+    auto end = aim.position;
+    const auto forward = first_person::rotate(aim.orientation, {0,0,-1});
+    for (unsigned i = 0; i < 3; ++i) end[i] += forward[i] * 3;
+    if (hit) end = hit->point;
+    std::string error;
+    if (const auto pose = math::beam_pose(aim.position, end, to_pose(location.pose).position);
+        pose && layers.size() + (hit ? 1u : 0u) < r.layer_limit && paint_pointer_chain(r.pointer_beam, false, trigger && hit.has_value(), error)) {
+        pointer_quad(beam, r.pointer_beam, *pose, .003f, first_person::length(first_person::subtract(end, aim.position)));
+        layers.push_back(reinterpret_cast<XrCompositionLayerBaseHeader*>(&beam));
+    }
+    if (hit && layers.size() < r.layer_limit && paint_pointer_chain(r.pointer_cursor, true, trigger, error)) {
+        auto pose = panel_pose;
+        const auto normal = first_person::rotate(pose.orientation, {0,0,.003f});
+        pose.position = first_person::add(hit->point, normal);
+        pointer_quad(cursor, r.pointer_cursor, pose, .028f, .028f);
+        layers.push_back(reinterpret_cast<XrCompositionLayerBaseHeader*>(&cursor));
+    }
+    if (!error.empty() && !r.pointer_error_logged) { r.pointer_error_logged = true; log_warning(error); }
+}
+
 // The game image as a flat screen in front of the recentred view.
 bool screen_layer(const Settings& options, ID3D12Resource* image, std::uint32_t width, std::uint32_t height,
     XrCompositionLayerQuad& quad, std::string& error) {
     auto& s = shared();
     auto& r = runtime();
     const auto generation = s.recenter_generation.load(std::memory_order_acquire);
-    if (generation != r.screen_recenter) {
+    if (generation != r.screen_recenter || !r.screen_open) {
         XrSpaceLocation location{XR_TYPE_SPACE_LOCATION};
         if (XR_SUCCEEDED(s.xr.locate_space(r.view, r.local, r.frame.predictedDisplayTime, &location)) &&
             (location.locationFlags & XR_SPACE_LOCATION_ORIENTATION_VALID_BIT)) {
@@ -667,6 +761,7 @@ bool screen_layer(const Settings& options, ID3D12Resource* image, std::uint32_t 
             if (!(location.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT)) head.position = {};
             r.screen_anchor = math::anchor_from(head);
             r.screen_recenter = generation;
+            r.screen_open = true;
         }
     }
     if (!ensure_chain(r.screen, width, height, error) || !copy_into(r.screen, image, error)) return false;
@@ -693,7 +788,8 @@ Status status() {
     return result;
 }
 
-bool wants_chat_panel() noexcept { return chat_wanted.load(std::memory_order_acquire); }
+void set_chat_keyboard_open(bool open) noexcept { chat_keyboard_open.store(open, std::memory_order_release); }
+bool wants_chat_panel() noexcept { return chat_wanted.load(std::memory_order_acquire) && !chat_keyboard_open.load(std::memory_order_acquire); }
 void submit_chat_panel(ID3D12Resource* texture, std::uint32_t width, std::uint32_t height) noexcept {
     auto& panel = chat_panel();
     panel.texture = texture;
@@ -719,6 +815,7 @@ void on_present(IDXGISwapChain3* chain, ID3D12CommandQueue* queue) noexcept {
         }
         const auto options = current_settings();
         if (!options.enabled) {
+            release_menu_pointer();
             if (r.instance && !r.running) teardown("VR off.", 0);
             else if (r.instance && !r.exit_requested) {
                 r.exit_requested = true;
@@ -756,6 +853,9 @@ void on_present(IDXGISwapChain3* chain, ID3D12CommandQueue* queue) noexcept {
         std::array<XrCompositionLayerProjectionView, 2> views{};
         XrCompositionLayerProjection projection{XR_TYPE_COMPOSITION_LAYER_PROJECTION};
         XrCompositionLayerQuad quad{XR_TYPE_COMPOSITION_LAYER_QUAD}, chat_quad{XR_TYPE_COMPOSITION_LAYER_QUAD};
+        XrCompositionLayerQuad pointer_beam{XR_TYPE_COMPOSITION_LAYER_QUAD}, pointer_cursor{XR_TYPE_COMPOSITION_LAYER_QUAD};
+        if (!options.enabled || (!s.ui_open.load(std::memory_order_acquire) && !s.game_menu.load(std::memory_order_acquire)))
+            release_menu_pointer();
         std::string error;
         ComPtr<ID3D12Resource> image;
         DXGI_SWAP_CHAIN_DESC1 desc{};
@@ -801,23 +901,50 @@ void on_present(IDXGISwapChain3* chain, ID3D12CommandQueue* queue) noexcept {
             }
             r.history.push_back(newest);
             while (r.history.size() > static_cast<std::size_t>(options.frame_lag) + 1) r.history.pop_front();
-            const auto match = r.history.size() == static_cast<std::size_t>(options.frame_lag) + 1 ? r.history.front() : std::nullopt;
+            auto match = r.history.size() == static_cast<std::size_t>(options.frame_lag) + 1 ? r.history.front() : std::nullopt;
+            if (options.stereo_mode == 2 && s.render_pose_available.load(std::memory_order_acquire)) {
+                std::lock_guard lock(s.records_mutex);
+                const auto generation = s.recenter_generation.load(std::memory_order_acquire);
+                if (s.rendered && s.rendered->generation == generation && now - s.rendered->sampled < 0.25) {
+                    r.renderer_pairing = true;
+                    match = s.rendered->sequence > r.render_collected ? s.rendered : std::nullopt;
+                    if (match) { r.render_collected = match->sequence; ++r.native_pairs; }
+                } else if (r.renderer_pairing) {
+                    if (!s.rendered || now - s.rendered->sampled > 0.5) {
+                        r.renderer_pairing = false;
+                        log_warning("native rendered-camera capture is stale; using legacy pairing until it resumes.");
+                    } else match.reset();
+                }
+            }
+            s.native_fov_ready.store(options.stereo_mode == 2 && r.renderer_pairing, std::memory_order_release);
+            if (match && !r.renderer_pairing) ++r.legacy_pairs;
             // Menus are drawn into the image, so they only read on the flat screen.
             const bool vr_camera = camera_active(now) && !s.ui_open.load(std::memory_order_acquire) &&
                 !s.game_menu.load(std::memory_order_acquire);
             chat_now = vr_camera && options.chat_in_vr;
-            if (!vr_camera) r.eye_ready = {};
+            if (vr_camera) r.screen_open = false;
+            if (!vr_camera) {
+                r.eye_ready = {};
+                r.kept_record.reset();
+                r.depth_pair = {};
+            }
             if (match) r.last_record = match;
             if (vr_camera && options.stereo_mode == 2) {
                 // Depth stereo: the kept previous frame and its depth (copied at this frame's clear)
                 // make both eyes; then this frame is kept for the next Present.
-                const auto depth = depth_texture();
-                if (r.depth_pending && depth) {
-                    // This frame's clear copied the kept frame's depth: snapshot it with its colour.
-                    if (r.stereo.keep_depth(r.queue.Get(), depth.Get(), options.edge_widening, error)) r.depth_pending = false;
-                    else failed = true;
+                const auto generation = s.recenter_generation.load(std::memory_order_acquire);
+                if (r.kept_record && (r.kept_record->generation != generation || r.kept_width != desc.Width ||
+                    r.kept_height != desc.Height || r.kept_format != desc.Format)) {
+                    r.kept_record.reset();
+                    r.depth_pair = {};
+                    r.eye_ready = {};
                 }
-                if (!failed && r.stereo.has_kept() && r.stereo.has_kept_depth() && !r.depth_pending && r.kept_record &&
+                const auto depth = depth_snapshot();
+                if (r.depth_pair.pending && depth.valid && r.depth_pair.accepts(depth.present)) {
+                    if (r.stereo.keep_depth(r.queue.Get(), depth.texture.Get(), options.edge_widening, error)) r.depth_pair.complete();
+                    else failed = true;
+                } else if (r.depth_pair.pending) ++r.depth_misses;
+                if (!failed && r.stereo.has_kept() && r.stereo.has_kept_depth() && r.depth_pair.ready && r.kept_record &&
                     r.kept_record->both) {
                     const auto& record = *r.kept_record;
                     StereoParams params;
@@ -833,13 +960,62 @@ void on_present(IDXGISwapChain3* chain, ID3D12CommandQueue* queue) noexcept {
                     params.max_shift = std::min(0.04f, params.scale * 0.15f);
                     params.background_fill = options.gap_fill == 1;
                     params.vignette = eye_vignette();
-                    if (ensure_chain(r.eyes[0], desc.Width, desc.Height, error) && ensure_chain(r.eyes[1], desc.Width, desc.Height, error) &&
+                    params.steps = static_cast<unsigned>(options.stereo_steps);
+                    params.source_horizontal = std::tan(record.fov.right);
+                    params.source_vertical = std::tan(record.fov.up);
+                    std::array<math::Pose, 2> output_pose{record.left, record.right};
+                    auto output_fov = record.headset_fov;
+                    if (options.late_rotation) {
+                        // Fresh views for this OpenXR frame, not a simulation pose from
+                        // several frames ago. Pixels are rotated into these views below.
+                        std::array<XrView, 2> late{XrView{XR_TYPE_VIEW}, XrView{XR_TYPE_VIEW}};
+                        XrViewLocateInfo locate{XR_TYPE_VIEW_LOCATE_INFO};
+                        locate.viewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
+                        locate.displayTime = r.frame.predictedDisplayTime;
+                        locate.space = r.local;
+                        XrViewState located{XR_TYPE_VIEW_STATE};
+                        std::uint32_t count = 0;
+                        if (XR_SUCCEEDED(s.xr.locate_views(r.session, &locate, &located, 2, &count, late.data())) && count == 2 &&
+                            (located.viewStateFlags & XR_VIEW_STATE_ORIENTATION_VALID_BIT)) {
+                            for (std::size_t e = 0; e < 2; ++e) {
+                                output_pose[e].orientation = to_pose(late[e].pose).orientation;
+                                output_fov[e] = {late[e].fov.angleLeft, late[e].fov.angleRight, late[e].fov.angleUp, late[e].fov.angleDown};
+                                params.rotation[e] = math::late_rotation_basis(record.pose.orientation, output_pose[e].orientation);
+                            }
+                        }
+                    }
+                    // Match pixel rays to the Quest/OpenXR runtime eye projections.
+                    // The native camera rendered a centred, symmetric frustum;
+                    // the shader resamples it into each tracked eye frustum.
+                    std::array<bool, 2> mapped{};
+                    for (std::size_t e = 0; e < 2; ++e) {
+                        if (const auto uv = math::eye_uv_mapping(record.fov, output_fov[e])) {
+                            params.u_scale[e] = uv->u_scale;
+                            params.v_scale[e] = uv->v_scale;
+                            params.u_bias[e] = uv->u_bias;
+                            params.v_bias[e] = uv->v_bias;
+                            mapped[e] = true;
+                        }
+                    }
+                    float coverage = 0;
+                    for (std::size_t e = 0; e < 2; ++e) if (mapped[e])
+                        coverage += std::clamp(params.u_scale[e], 0.0f, 1.0f) * std::clamp(params.v_scale[e], 0.0f, 1.0f) * 50.0f;
+                    update_status([&](Status& st) {
+                        st.source_coverage = coverage;
+                        st.measured_fov_ready = r.renderer_pairing;
+                    });
+                    const auto eye_width = math::eye_extent(desc.Width, options.eye_render_scale);
+                    const auto eye_height = math::eye_extent(desc.Height, options.eye_render_scale);
+                    if (ensure_chain(r.eyes[0], eye_width, eye_height, error) && ensure_chain(r.eyes[1], eye_width, eye_height, error) &&
                         render_stereo_into({&r.eyes[0], &r.eyes[1]}, params, error)) {
                         for (std::uint32_t v = 0; v < 2; ++v) {
                             r.eye_ready[v] = true;
                             r.eye_records[v] = record;
                             r.eye_records[v].view = v;
-                            r.eye_records[v].pose = v ? record.right : record.left;
+                            r.eye_records[v].pose = output_pose[v];
+                            // The depth pass has remapped the image to the actual
+                            // headset frustum. Other stereo paths stay symmetric.
+                            if (mapped[v]) r.eye_records[v].fov = output_fov[v];
                         }
                         update_status([](Status& st) { st.eye_images += 2; });
                     } else failed = true;
@@ -864,7 +1040,10 @@ void on_present(IDXGISwapChain3* chain, ID3D12CommandQueue* queue) noexcept {
                 if (!failed && match) {
                     if (r.stereo.keep(r.queue.Get(), image.Get(), error)) {
                         r.kept_record = match;
-                        r.depth_pending = true;
+                        r.kept_width = desc.Width;
+                        r.kept_height = desc.Height;
+                        r.kept_format = desc.Format;
+                        r.depth_pair.keep(depth_present());
                     } else failed = true;
                 }
             } else if (vr_camera && match && match->both) {
@@ -916,8 +1095,10 @@ void on_present(IDXGISwapChain3* chain, ID3D12CommandQueue* queue) noexcept {
                     log_warning("chat panel: " + chat_error);
                 }
             } else if (!failed && !vr_camera) {
-                if (screen_layer(options, image.Get(), desc.Width, desc.Height, quad, error))
+                if (screen_layer(options, image.Get(), desc.Width, desc.Height, quad, error)) {
                     layers.push_back(reinterpret_cast<XrCompositionLayerBaseHeader*>(&quad));
+                    menu_pointer_layers(chain, quad, layers, pointer_beam, pointer_cursor);
+                }
                 else failed = true;
             }
             update_status([&](Status& st) {
@@ -967,6 +1148,23 @@ void after_present() noexcept {
         }
         handle_events();
         if (r.instance && r.running) input_sync(r.session, r.state == XR_SESSION_STATE_FOCUSED);
+        if (!r.running || r.state != XR_SESSION_STATE_FOCUSED) release_menu_pointer();
+        const auto options = current_settings();
+        const bool input_active = r.running && r.state == XR_SESSION_STATE_FOCUSED && options.enabled;
+        const bool can_switch = input_active && options.stick_view_switch && camera_active(seconds_now()) &&
+            !s.ui_open.load(std::memory_order_acquire) && !s.game_menu.load(std::memory_order_acquire);
+        const auto physical = input_active ? xinput_peek() : PadPeek{};
+        const auto touch = input_active ? controller_pad() : VirtualPad{};
+        if (r.recenter_click.sample(input_active, physical.right_click || touch.right_click)) {
+            recenter();
+            log_info("Recentred (right stick click).");
+        }
+        if (r.view_switch.sample(can_switch, physical.left_click || touch.left_click, physical.right_click || touch.right_click)) {
+            auto changed = current_settings();
+            changed.view_mode = changed.view_mode == 0 ? 1 : 0;
+            (void)set_settings(changed);
+            log_info(changed.view_mode == 0 ? "First person (left stick click)." : "Third person (left stick click).");
+        }
         if (!r.instance || !r.running || r.frame_begun) return;
         XrFrameWaitInfo wait{XR_TYPE_FRAME_WAIT_INFO};
         r.frame = {XR_TYPE_FRAME_STATE};

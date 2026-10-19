@@ -41,6 +41,7 @@ struct LaunchOptions {
     unsigned width{1280};
     unsigned height{720};
     bool force_windowed{};
+    bool vr{}; // Start the OpenXR session after the player profile loads.
     bool gpu_diagnostics{};
     bool discord{true}; // the game may show a Discord status (--no-discord: never)
     bool window_console{};

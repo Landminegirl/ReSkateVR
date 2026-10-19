@@ -208,6 +208,8 @@ void debug_flight_tick(SourceTrial& trial, std::uintptr_t client, bool ready, bo
     source_require(camera.identity == debug.camera_identity && camera.mode == 1 && camera.active == camera.identity.camera,
         debug.first_person ? "First person lost the camera; view paused." : "Freecam ownership changed; movement paused.");
     auto next = debug.flight_matrix;
+    std::optional<vr::BodyPose> vr_body;
+    std::optional<std::array<float, 16>> vr_raw;
     if (debug.first_person) {
         // Respawns, loads and bails can briefly leave no readable head. Hold the
         // last pose instead of dropping the view, and say why once.
@@ -234,7 +236,11 @@ void debug_flight_tick(SourceTrial& trial, std::uintptr_t client, bool ready, bo
                 // with this frame's; this only covers frames without one.
                 for (const std::size_t i : {0u, 1u, 2u, 4u, 5u, 6u, 8u, 9u, 10u, 12u, 13u, 14u}) next[i] = latest->head[i];
                 origin = latest->origin;
+                const bool riding = latest->on_board || (latest->physics_state >= 100 && latest->physics_state < 500);
+                vr_body = vr::BodyPose{origin, latest->chest_heading, riding, latest->physics_state,
+                    latest->board, latest->trajectory_heading};
             } else origin = first_person_head_matrix(trial.base, component, next);
+            vr_raw = next;
         } catch (const SourceGuard& guard) {
             first_person_disarm();
             debug.status = guard.message;
@@ -329,7 +335,10 @@ void debug_flight_tick(SourceTrial& trial, std::uintptr_t client, bool ready, bo
     debug.flight_ready = false; // An exceptional setter must not be retried automatically.
     // In VR first person shows this frame's eye; the flight state keeps the head pose.
     auto view = next;
-    if (debug.first_person) (void)vr::apply_camera(view, vr::CameraWriter::tick);
+    if (debug.first_person) {
+        auto vr_view = vr_raw ? *vr_raw : next;
+        if (vr::apply_camera(vr_view, vr::CameraWriter::tick, vr_body ? &*vr_body : nullptr)) view = vr_view;
+    }
     SetLastError(error);
     trial.camera_transform(camera.identity.camera, &view);
     debug.flight_matrix = next;

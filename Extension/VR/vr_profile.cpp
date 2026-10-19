@@ -16,6 +16,7 @@ namespace key {
 constexpr const char* enabled = "VR.Enabled";
 constexpr const char* positional = "VR.Positional";
 constexpr const char* level_horizon = "VR.LevelHorizon";
+constexpr const char* head_centred = "VR.HeadCentred";
 constexpr const char* fov_vertical = "VR.FovVertical";
 constexpr const char* turn_smoothing = "VR.TurnSmoothing";
 constexpr const char* world_scale = "VR.WorldScale";
@@ -32,6 +33,12 @@ constexpr const char* frame_lag = "VR.FrameLag";
 constexpr const char* hide_body = "VR.HideBody";
 constexpr const char* hide_body_foot = "VR.HideBodyFoot";
 constexpr const char* view_mode = "VR.ViewMode";
+constexpr const char* stick_view_switch = "VR.StickViewSwitch";
+constexpr const char* hud_area = "VR.HudArea";
+constexpr const char* late_rotation = "VR.LateRotation";
+constexpr const char* menu_pointer = "VR.MenuPointer";
+constexpr const char* eye_render_scale = "VR.EyeRenderScale";
+constexpr const char* stereo_steps = "VR.StereoSteps";
 constexpr const char* stereo_mode = "VR.StereoMode";
 constexpr const char* depth_strength = "VR.DepthStrength";
 constexpr const char* lens_effects_off = "VR.LensEffectsOff";
@@ -80,11 +87,30 @@ struct Field {
     bool Settings::*flag = nullptr;
     float Settings::*real = nullptr;
     int Settings::*whole = nullptr;
+    int binding = -1;
 };
 const std::array fields{
+    Field{.key = "VR.HeadsetPacing", .flag = &Settings::headset_pacing},
+    Field{.key = "VR.EfficientFov", .flag = &Settings::efficient_fov},
+    Field{.key = "VR.PointerButton", .whole = &Settings::pointer_button},
+    Field{.key = "VR.VoiceToggle", .flag = &Settings::voice_toggle},
+    Field{.key = "VR.Binding0", .binding = 0},
+    Field{.key = "VR.Binding1", .binding = 1},
+    Field{.key = "VR.Binding2", .binding = 2},
+    Field{.key = "VR.Binding3", .binding = 3},
+    Field{.key = "VR.Binding4", .binding = 4},
+    Field{.key = "VR.Binding5", .binding = 5},
+    Field{.key = "VR.Binding6", .binding = 6},
+    Field{.key = "VR.Binding7", .binding = 7},
+    Field{.key = "VR.Binding8", .binding = 8},
+    Field{.key = "VR.Binding9", .binding = 9},
+    Field{.key = "VR.Binding10", .binding = 10},
+    Field{.key = "VR.Binding11", .binding = 11},
+
     Field{.key = key::enabled, .flag = &Settings::enabled},
     Field{.key = key::positional, .flag = &Settings::positional},
     Field{.key = key::level_horizon, .flag = &Settings::level_horizon},
+    Field{.key = key::head_centred, .flag = &Settings::head_centred},
     Field{.key = key::fov_vertical, .flag = &Settings::fov_vertical},
     Field{.key = key::turn_smoothing, .real = &Settings::turn_smoothing},
     Field{.key = key::world_scale, .real = &Settings::world_scale},
@@ -101,6 +127,12 @@ const std::array fields{
     Field{.key = key::hide_body, .whole = &Settings::hide_body},
     Field{.key = key::hide_body_foot, .whole = &Settings::hide_body_foot},
     Field{.key = key::view_mode, .whole = &Settings::view_mode},
+    Field{.key = key::stick_view_switch, .flag = &Settings::stick_view_switch},
+    Field{.key = key::hud_area, .real = &Settings::hud_area},
+    Field{.key = key::late_rotation, .flag = &Settings::late_rotation},
+    Field{.key = key::menu_pointer, .flag = &Settings::menu_pointer},
+    Field{.key = key::eye_render_scale, .real = &Settings::eye_render_scale},
+    Field{.key = key::stereo_steps, .whole = &Settings::stereo_steps},
     Field{.key = key::stereo_mode, .whole = &Settings::stereo_mode},
     Field{.key = key::depth_strength, .real = &Settings::depth_strength},
     Field{.key = key::lens_effects_off, .flag = &Settings::lens_effects_off},
@@ -138,6 +170,9 @@ void inherit_foot_seat(Settings& value) {
 }
 
 void clamp_choices(Settings& value) {
+    value.pointer_button = std::clamp(value.pointer_button, 0, 10);
+    for (std::size_t i = 0; i < value.bindings.size(); ++i)
+        if (!controls::valid(value.bindings[i])) value.bindings[i] = controls::defaults[i];
     value.look_turn_degrees = std::clamp(value.look_turn_degrees, 0, Limits::look_turn_max);
     value.look_turn_style = std::clamp(value.look_turn_style, 0, 1);
     value.smooth_turn_speed = std::clamp(value.smooth_turn_speed, Limits::smooth_turn_speed_min, Limits::smooth_turn_speed_max);
@@ -154,6 +189,7 @@ Json to_json(const Settings& value) {
         if (field.flag) result[field.key] = value.*field.flag;
         if (field.real) result[field.key] = static_cast<double>(value.*field.real);
         if (field.whole) result[field.key] = static_cast<double>(value.*field.whole);
+        if (field.binding >= 0) result[field.key] = value.bindings[static_cast<std::size_t>(field.binding)];
     }
     return result;
 }
@@ -168,6 +204,7 @@ void from_json(const Json& saved, Settings& value) {
         if (!std::isfinite(number) || std::abs(number) > 1e6) continue;
         if (field.real) value.*field.real = static_cast<float>(number);
         if (field.whole) value.*field.whole = static_cast<int>(std::lround(number));
+        if (field.binding >= 0) value.bindings[static_cast<std::size_t>(field.binding)] = static_cast<int>(std::lround(number));
     }
     if (!saved.contains(key::seat_forward_foot)) inherit_foot_seat(value);
     clamp_choices(value);
@@ -182,14 +219,42 @@ void load() noexcept {
             } else if (const auto saved = number(field.key); saved && std::abs(*saved) < 1e6) {
                 if (field.real) value.*field.real = static_cast<float>(*saved);
                 if (field.whole) value.*field.whole = static_cast<int>(std::lround(*saved));
+                if (field.binding >= 0) value.bindings[static_cast<std::size_t>(field.binding)] = static_cast<int>(std::lround(*saved));
             }
         }
         if (!number(key::seat_forward_foot)) inherit_foot_seat(value);
         // Older builds offered choices that are gone; keep the rest.
         clamp_choices(value);
         // Out-of-range saves keep the defaults rather than half-applying.
-        (void)set_settings(value);
-        (void)take_settings_changed(); // Nothing new to save.
+        wchar_t launch[2]{};
+        const auto launch_length = GetEnvironmentVariableW(L"RESKATE_VR_LAUNCH", launch, 2);
+        const char launch_choice = launch_length == 1 && (launch[0] == L'0' || launch[0] == L'1')
+            ? static_cast<char>(launch[0]) : '\0';
+        const bool start_vr = launch_choice == '1';
+        const bool first_quest2_launch = start_vr &&
+            !profile_runtime::local_preference("VR.Quest2Setup").value_or(false);
+        if (first_quest2_launch) value = quest2_balanced(value);
+        const bool camera_update = start_vr &&
+            !profile_runtime::local_preference("VR.Quest2HeadCameraV2").value_or(false);
+        if (camera_update) value = quest2_head_camera(value);
+        const bool hud_update = start_vr && !profile_runtime::local_preference("VR.Quest2HudV5").value_or(false);
+        if (hud_update) value.hud_area = 0.5f;
+        const bool framing_update = start_vr && !profile_runtime::local_preference("VR.SharperDefaultV10").value_or(false);
+        if (framing_update) value.efficient_fov = true;
+        value = apply_launch_choice(value, launch_choice);
+        if (set_settings(value) && (first_quest2_launch || camera_update || hud_update || framing_update)) {
+            // Migrate old VR settings once; preserve the player's later adjustments.
+            std::vector<std::pair<std::string, Json>> values;
+            const auto saved_values = to_json(value);
+            for (const auto& field : fields) values.emplace_back(field.key, saved_values[field.key]);
+            values.emplace_back("VR.Quest2Setup", Json(true));
+            values.emplace_back("VR.Quest2HeadCameraV2", Json(true));
+            values.emplace_back("VR.Quest2HudV5", Json(true));
+            values.emplace_back("VR.SharperDefaultV10", Json(true));
+            profile_runtime::set_local_values(values);
+        }
+        controller_profile_ready();
+        (void)take_settings_changed(); // The launch choice itself is session-only.
 
         // Saved presets: a JSON list of {name, settings}, stored as text.
         std::vector<Preset> saved;

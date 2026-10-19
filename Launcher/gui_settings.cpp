@@ -1,4 +1,5 @@
 #include "gui_internal.h"
+#include "Extension/VR/vr_guide.h"
 
 #include <cmath>
 #include <format>
@@ -316,6 +317,42 @@ bool key_bindings(const Fonts& fonts, Settings& settings, Ui& ui) {
 
 } // namespace
 
+void vr_guide_window(Launcher& launcher, const Fonts& fonts, ImVec2 size, Ui& ui) {
+    const auto& pages = vr::guide::pages;
+    ui.vr_guide_page = std::clamp(ui.vr_guide_page, 0, 4);
+    const auto panel = begin_panel("##vr_guide", size, ImVec2(S(840), S(620)));
+    panel_title(fonts, pages[ui.vr_guide_page].title);
+    ImGui::TextDisabled("VR tutorial - %d / 5", ui.vr_guide_page + 1);
+    const float footer = ImGui::GetFrameHeight() + S(34);
+    ImGui::BeginChild("##vr_guide_text", ImVec2(0, panel.y - ImGui::GetCursorPosY() - footer), ImGuiChildFlags_NavFlattened);
+    ImGui::PushTextWrapPos(0);
+    ImGui::TextUnformatted(pages[ui.vr_guide_page].text);
+    ImGui::PopTextWrapPos();
+    ImGui::EndChild();
+    if (ImGui::Button("Close")) { ui.vr_guide = ui.vr_guide_launch = false; }
+    ImGui::SameLine();
+    ImGui::BeginDisabled(ui.vr_guide_page == 0);
+    if (ImGui::Button("Back")) --ui.vr_guide_page;
+    ImGui::EndDisabled();
+    ImGui::SameLine();
+    const bool last = ui.vr_guide_page == 4;
+    if (ImGui::Button(last ? (ui.vr_guide_launch ? "Finish and launch VR" : "Finish") : "Next")) {
+        if (!last) ++ui.vr_guide_page;
+        else {
+            launcher.settings().vr_guide_version = 1;
+            launcher.save();
+            ui.vr_guide = false;
+            if (ui.vr_guide_launch) {
+                launcher.select_launch(true);
+                if (ui.mods_pending && !ui.mods_updates_ignored) ui.mods_update_prompt = true;
+                else launcher.play();
+            }
+            ui.vr_guide_launch = false;
+        }
+    }
+    ImGui::End();
+}
+
 void settings_window(Launcher& launcher, const Fonts& fonts, ImVec2 size, Ui& ui, HWND window) {
     bool& open = ui.settings;
     // A page, like the mod manager: the same rail, the same way out.
@@ -339,9 +376,9 @@ void settings_window(Launcher& launcher, const Fonts& fonts, ImVec2 size, Ui& ui
     // Flattened, so a controller's D-pad crosses from the rail into the page and back.
     ImGui::BeginChild("##settings_rail", ImVec2(rail_width, bottom - rail_top), ImGuiChildFlags_NavFlattened);
     // The launcher's own pages, then the game's (game_settings.h).
-    static constexpr std::array<const char*, 9> names{"GAME", "DISPLAY", "KEYS", "ADVANCED",
+    static constexpr std::array<const char*, 10> names{"GAME", "DISPLAY", "KEYS", "ADVANCED", "VR",
                                                       "GRAPHICS", "AUDIO", "CAMERA", "CONTROLS", "REPLAY"};
-    constexpr int game_pages = 4;
+    constexpr int game_pages = 5;
     ImGui::BeginDisabled(binding);
     for (int i = 0; i < static_cast<int>(names.size()); ++i) {
         if (i == game_pages) {
@@ -398,7 +435,8 @@ void settings_window(Launcher& launcher, const Fonts& fonts, ImVec2 size, Ui& ui
         break;
     }
     case 1:
-        section_caption(fonts, "WINDOW");
+        section_caption(fonts, "STANDARD PLAY WINDOW");
+        setting_note("These settings apply to PLAY. LAUNCH VR always uses the square window chosen in the VR tab.");
         setting_check("Windowed", "Start in a window of this size instead of the game's saved display settings.",
                       settings.windowed);
         ImGui::BeginDisabled(!settings.windowed);
@@ -415,6 +453,23 @@ void settings_window(Launcher& launcher, const Fonts& fonts, ImVec2 size, Ui& ui
         settings.width = std::clamp(settings.width, 320, 16384);
         settings.height = std::clamp(settings.height, 200, 16384);
         break;
+    case 4: {
+        section_caption(fonts, "VR DISPLAY - ALWAYS SQUARE / WINDOWED");
+        setting_note("Fullscreen and maximize are blocked during VR. One size sets both width and height; standard PLAY keeps its own settings.");
+        ImGui::BeginDisabled(busy || launcher.game() != 0);
+        ImGui::SetNextItemWidth(S(260));
+        ImGui::SliderInt("Square size (pixels)", &settings.vr_size, 720, 3840, "%d", ImGuiSliderFlags_AlwaysClamp);
+        settings.vr_size = std::clamp(settings.vr_size, 720, 3840);
+        ImGui::Text("VR window: %d x %d", settings.vr_size, settings.vr_size);
+        ImGui::EndDisabled();
+        setting_note("Smaller sizes reduce rendering cost. Start around 1440 or 1600 if movement stutters; increase once stable. Changes apply on the next VR launch.");
+        ImGui::Spacing();
+        if (ImGui::Button("Open VR tutorial")) {
+            ui.vr_guide = true; ui.vr_guide_launch = false; ui.vr_guide_page = 0;
+        }
+        setting_note("In game: hold the hamburger menu, then ADDONS > VR for HUD, comfort, input source, button bindings and voice activation.");
+        break;
+    }
     case 2:
         if (key_bindings(fonts, settings, ui)) launcher.save();
         break;
@@ -423,7 +478,10 @@ void settings_window(Launcher& launcher, const Fonts& fonts, ImVec2 size, Ui& ui
         if (!game_settings_ready(launcher, ui, running)) break;
         const std::string_view page = names[static_cast<std::size_t>(std::clamp(ui.settings_tab, game_pages, static_cast<int>(names.size()) - 1))];
         game_settings_page(fonts, ui, page, running);
-        if (page == "GRAPHICS") graphics_options(fonts, ui, running);
+        if (page == "GRAPHICS") {
+            setting_note("VR always overrides the saved display mode with a square window. Set its size in the VR tab.");
+            graphics_options(fonts, ui, running);
+        }
         break;
     }
     case 3:

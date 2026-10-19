@@ -109,7 +109,7 @@ void map_page(SkateMenu&, const Model&, const CallbacksV3&);
 void build_page(SkateMenu&, const Model&, const CallbacksV3&);
 void skater_page(SkateMenu&, const Model&, const CallbacksV3&);
 // Addons > VR (skate_menu_vr.cpp).
-void vr_controls(SkateMenu&, const Model&);
+void vr_controls(SkateMenu&, const Model&, const CallbacksV3&);
 void settings_page(SkateMenu&, const Model&, const CallbacksV3&);
 // Settings > Post FX (skate_menu_world.cpp).
 void graphics_page(SkateMenu&, const Model&, const CallbacksV3&);

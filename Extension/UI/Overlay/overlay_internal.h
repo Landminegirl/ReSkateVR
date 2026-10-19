@@ -1,5 +1,6 @@
 #pragma once
 #include "overlay.h"
+#include "Extension/VR/vr_activation.h"
 #include "Engine/Core/Console/command_registry.h"
 #include "Extension/Skater/free_flight.h"
 #include "gpu_diagnostics.h"
@@ -128,6 +129,7 @@ struct State {
     std::atomic<bool> console_focus_requested{false};
     // Multiplayer text chat (chat_overlay.cpp): T opens it while in a session.
     std::atomic<bool> chat_visible{false}, chat_available{false};
+    bool vr_chat_open = false; // render-thread-only keyboard chat, over the flat menu panel
     std::atomic<bool> chat_character_pending{false}, chat_escape_pending{false}, chat_focus_requested{false};
     std::atomic<bool> chat_command_requested{false}; // opened with "/": the box starts with it
     // The Multiplayer page drawn in the game's pause menu (hub_page.cpp). hub_pointer: it is
@@ -144,6 +146,7 @@ struct State {
     std::atomic<bool> input_attached{false};
     std::atomic<bool> stop{false};
     std::atomic<HWND> window{nullptr};
+    dingosdk::vr::MenuActivation vr_menu_activation;
     struct WindowHook { WNDPROC previous{}; bool installed{}; };
     std::recursive_mutex window_hook_mutex;
     std::map<HWND, WindowHook> window_hooks;
@@ -158,6 +161,7 @@ struct State {
     std::atomic<bool> prompt_input_active{false}; // DingoSDKOverlaySetPromptInputCapture
     bool show_on_ready = false;
     bool force_windowed = false;
+    bool force_square = false; // VR launch: keep the client and render image square.
     // Client size requested by the launcher (RESKATE_WINDOW_WIDTH/HEIGHT); 0 keeps the game's.
     UINT forced_width = 0, forced_height = 0;
     HANDLE stop_event = nullptr;

@@ -33,7 +33,9 @@ double seconds_now() noexcept {
 
 bool valid(const Settings& v) noexcept {
     const auto in = [](float value, float low, float high) { return std::isfinite(value) && value >= low && value <= high; };
-    return in(v.turn_smoothing, 0, Limits::turn_smoothing_max) &&
+    return std::all_of(v.bindings.begin(), v.bindings.end(), controls::valid) &&
+        v.pointer_button >= 0 && v.pointer_button <= 10 && in(v.hud_area, 0.1f, 1.0f) && in(v.eye_render_scale, 0.5f, 1.0f) &&
+        v.stereo_steps >= 12 && v.stereo_steps <= 48 && in(v.turn_smoothing, 0, Limits::turn_smoothing_max) &&
         in(v.world_scale, Limits::world_scale_min, Limits::world_scale_max) &&
         in(v.fov_correction, Limits::fov_correction_min, Limits::fov_correction_max) &&
         in(v.seat_forward, Limits::seat_forward_min, Limits::seat_max) && in(v.seat_up, Limits::seat_min, Limits::seat_max) &&
@@ -66,12 +68,21 @@ Settings settings() noexcept { return detail::current_settings(); }
 bool set_settings(const Settings& value) noexcept {
     if (!valid(value)) return false;
     auto& s = detail::shared();
+    bool view_changed = false;
     {
         std::lock_guard lock(s.settings_mutex);
+        view_changed = s.settings.view_mode != value.view_mode || s.settings.head_centred != value.head_centred;
         s.settings = value;
     }
+    if (view_changed) recenter(); // New view starts around the headset's current pose.
     s.settings_changed.store(true, std::memory_order_release);
     return true;
+}
+
+bool headset_pacing_active() noexcept {
+    const auto& s = detail::shared();
+    const auto options = detail::current_settings();
+    return s.tracking.load(std::memory_order_acquire) && options.enabled && options.headset_pacing;
 }
 
 bool take_settings_changed() noexcept { return detail::shared().settings_changed.exchange(false); }
@@ -216,7 +227,10 @@ void observe_gamepad(std::uint32_t user, std::int16_t right_x, std::uint8_t trig
         if (std::abs(x.load(std::memory_order_relaxed)) > std::abs(strongest)) strongest = x.load(std::memory_order_relaxed);
     right_stick_x.store(strongest, std::memory_order_relaxed);
 }
-void recenter() noexcept { detail::shared().recenter_generation.fetch_add(1, std::memory_order_acq_rel); }
+void recenter() noexcept {
+    cancel_menu_pointer();
+    detail::shared().recenter_generation.fetch_add(1, std::memory_order_acq_rel);
+}
 
 namespace {
 using namespace detail;
@@ -230,6 +244,10 @@ struct Camera {
     // they took over (from the on-foot heading), and whether they drove the view last update.
     math::EyesHeading eyes;
     math::EyesPosition eyes_place;
+    math::HeadOrigin head_origin;
+    math::PlayerHeading player_heading;
+    std::optional<BodyPose> last_body;
+    bool head_mode = false;
     float eyes_blend = 0;
     bool eyes_on = false;
     math::TiltRig tilt_rig;
@@ -313,7 +331,11 @@ bool apply_camera(std::array<float, 16>& matrix, CameraWriter writer, const Body
         if (predicted <= 0) return false;
         // This write's image reaches the screen `frame_lag` frames after the
         // frame the headset is waiting for now.
-        const XrTime display_time = predicted + period * static_cast<XrDuration>(options.frame_lag);
+        // Image pairing is separate from head prediction. Use the runtime's current
+        // predicted time in head-centred mode; old image poses remain attached to
+        // their images so OpenXR can reproject them correctly.
+        const XrTime display_time = options.head_centred ? predicted
+            : predicted + period * static_cast<XrDuration>(options.frame_lag);
         std::array<XrView, 2> views{};
         math::Pose head;
         if (!locate(s, display_time, views, head)) return false;
@@ -322,6 +344,8 @@ bool apply_camera(std::array<float, 16>& matrix, CameraWriter writer, const Body
         auto& c = camera();
         std::lock_guard lock(c.mutex);
         const double now = seconds_now();
+        if (body) c.last_body = *body;
+        else if (options.head_centred && options.view_mode == 0 && c.last_body) body = &*c.last_body;
         // The render handoff ends each frame. Without it (its hook unavailable),
         // the tick is the only writer and ends the frame itself.
         if (writer == CameraWriter::render) c.render_seen = now;
@@ -334,16 +358,26 @@ bool apply_camera(std::array<float, 16>& matrix, CameraWriter writer, const Body
             if (now - c.last_log > 1.0) {
                 c.last_log = now;
                 logging::write(logging::Level::info, logging::Channel::graphics,
-                    std::format("VR: recentred; head at ({:.2f}, {:.2f}, {:.2f}) m in the tracking space.",
-                        head.position[0], head.position[1], head.position[2]));
+                    std::format("VR: recentred; head at ({:.2f}, {:.2f}, {:.2f}) m; head-centred {}, frame pairing {}, extra prediction {} frames.",
+                        head.position[0], head.position[1], head.position[2], options.head_centred,
+                        options.frame_lag, options.head_centred ? 0 : options.frame_lag));
             }
             c.recenter_applied = recenter;
+            c.bail = c.grab = c.outside = false;
+            c.grab_seen = c.tilted_since = c.upright_since = 0;
+            c.lift = 0;
+            c.boom = 1;
+            c.turn_ready = false;
+            c.turn_held = false;
+            c.rig_time = c.origin_time = 0;
             c.heading = std::numeric_limits<float>::quiet_NaN();
             c.travel = std::numeric_limits<float>::quiet_NaN();
             c.velocity = {};
             c.heading_rig = {};
             c.eyes = {};
             c.eyes_place = {};
+            c.head_origin = {};
+            c.player_heading = {};
             c.eyes_on = false;
             c.tilt_rig = {};
         }
@@ -358,6 +392,8 @@ bool apply_camera(std::array<float, 16>& matrix, CameraWriter writer, const Body
             c.heading_rig = {};
             c.eyes = {};
             c.eyes_place = {};
+            c.head_origin = {};
+            c.player_heading = {};
             c.eyes_on = false;
             c.tilt_rig = {};
             c.trail.clear();
@@ -383,6 +419,13 @@ bool apply_camera(std::array<float, 16>& matrix, CameraWriter writer, const Body
         const float rig_elapsed = frame_end && c.rig_time > 0 ? static_cast<float>(now - c.rig_time) : 0.0f;
         if (frame_end) c.rig_time = now;
         const bool first = options.view_mode == 0;
+        const bool head_centred = first && options.head_centred;
+        if (c.head_mode != head_centred) {
+            c.head_mode = head_centred;
+            c.head_origin = {};
+            c.player_heading = {};
+            c.eyes_place = {};
+        }
 
         // The view's heading.
         //  - First person: through the skater's eyes (math::eyes_heading): the head's turn,
@@ -419,7 +462,12 @@ bool apply_camera(std::array<float, 16>& matrix, CameraWriter writer, const Body
             if (turn != 0 && c.outside) c.bail_heading = math::wrap(c.bail_heading + turn);
             else if (turn != 0 && look) c.heading = math::wrap(c.heading + turn);
         }
-        if (body && first) {
+        if (body && head_centred) {
+            // Locomotion turns the player rig; animated neck/head twists do not.
+            if (!look) c.heading = math::player_heading(c.player_heading, body->trajectory_heading, body->chest_heading);
+            c.eyes_on = false;
+            c.heading_rig.value = c.heading;
+        } else if (body && first) {
             const float eyes = math::eyes_heading(c.eyes, first_person::orientation(matrix), frame_end ? rig_elapsed : 0.0f);
             if (!look) {
                 // Taking over from the on-foot heading (or at the start), the difference fades over 0.4 s.
@@ -443,7 +491,11 @@ bool apply_camera(std::array<float, 16>& matrix, CameraWriter writer, const Body
         auto base = matrix;
         const bool body_near = body && std::abs(matrix[12] - body->origin[0]) < 3.0f &&
             std::abs(matrix[13] - body->origin[1]) < 3.0f && std::abs(matrix[14] - body->origin[2]) < 3.0f;
-        if (body_near) {
+        if (body && head_centred && (body_near || c.head_origin.ready)) {
+            const auto at = math::head_origin(c.head_origin, {matrix[12], matrix[13], matrix[14]},
+                body->origin, c.heading);
+            for (std::size_t i = 0; i < 3; ++i) base[12 + i] = at[i];
+        } else if (body_near) {
             // The view's position: the body origin plus the head's offset from it through one
             // continuous filter (math::eyes_position): bob smoothed, ollies and flips passed,
             // crouches scaled by Crouch.
@@ -499,13 +551,16 @@ bool apply_camera(std::array<float, 16>& matrix, CameraWriter writer, const Body
             // The game renders from between the eyes; the stereo shader makes both.
             const auto other = to_pose(views[view ^ 1u].pose);
             for (std::size_t i = 0; i < 3; ++i) eye.position[i] = (eye.position[i] + other.position[i]) * 0.5f;
+            if (head_centred) eye.orientation = head.orientation;
         }
         const auto aspect = s.image_aspect.load(std::memory_order_acquire);
         std::array<math::Tangents, 2> tangents{};
         for (std::size_t i = 0; i < 2; ++i)
             tangents[i] = math::tangents_from_angles(views[i].fov.angleLeft, views[i].fov.angleRight, views[i].fov.angleUp, views[i].fov.angleDown);
         const float tangent = math::render_tangent(tangents, aspect, options.fov_scale);
-        const float fov = math::native_fov_degrees(tangent * options.fov_correction, aspect, options.fov_vertical);
+        const float correction = options.efficient_fov && options.stereo_mode == 2 && s.native_fov_ready.load(std::memory_order_acquire)
+            ? 1.0f : options.fov_correction;
+        const float fov = math::native_fov_degrees(tangent * correction, aspect, options.fov_vertical);
         if (!std::isfinite(fov) || fov < 10.0f || fov > 170.0f) {
             if (now - c.last_skip_log > 1.0) {
                 c.last_skip_log = now;
@@ -661,18 +716,33 @@ bool apply_camera(std::array<float, 16>& matrix, CameraWriter writer, const Body
         s.camera_time.store(now, std::memory_order_release);
         s.camera_thread.store(GetCurrentThreadId(), std::memory_order_relaxed);
         c.last_write = now;
-        if (frame_end) {
-            {
-                std::lock_guard records(s.records_mutex);
-                EyeRecord record{s.next_sequence++, view, eye, math::layer_angles(tangent, aspect)};
-                if (side_by_side) {
-                    record.both = true;
-                    record.left = to_pose(views[0].pose);
-                    record.right = to_pose(views[1].pose);
-                }
+        {
+            EyeRecord record{};
+            record.view = view;
+            record.pose = eye;
+            record.fov = math::layer_angles(tangent * correction, aspect);
+            record.world = result;
+            record.world_scale = options.world_scale;
+            record.sampled = now;
+            record.generation = recenter;
+            for (std::size_t i = 0; i < 2; ++i)
+                record.headset_fov[i] = {views[i].fov.angleLeft, views[i].fov.angleRight,
+                    views[i].fov.angleUp, views[i].fov.angleDown};
+            if (side_by_side) {
+                record.both = true;
+                record.left = to_pose(views[0].pose);
+                record.right = to_pose(views[1].pose);
+            }
+            std::lock_guard records(s.records_mutex);
+            s.issued.push_back(record);
+            while (s.issued.size() > 128) s.issued.pop_front();
+            if (frame_end) {
+                record.sequence = s.next_sequence++;
                 s.records.push_back(record);
                 while (s.records.size() > 16) s.records.pop_front();
             }
+        }
+        if (frame_end) {
             c.next_view = view ^ 1u;
             s.camera_frames.fetch_add(1, std::memory_order_relaxed);
         }

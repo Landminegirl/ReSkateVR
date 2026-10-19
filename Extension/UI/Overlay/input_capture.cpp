@@ -5,6 +5,7 @@
 #include "Engine/Game/Input/playstation_report.h"
 #include <hidsdi.h>
 #include "Extension/VR/vr.h"
+#include "Extension/VR/vr_xinput.h"
 #include <atomic>
 #include <format>
 #include <algorithm>
@@ -50,7 +51,7 @@ struct InputCaptureHooks {
     std::map<OVERLAPPED*, HidRead> hid_reads;
     Hook register_raw;
     Hook async_key, key, keyboard, raw_data, raw_buffer, capture, release_capture, cursor, show_cursor, physical_cursor, cursor_position;
-    std::array<Hook, 5> xinput_state, xinput_extended, xinput_keystroke;
+    std::array<Hook, 5> xinput_state, xinput_extended, xinput_keystroke, xinput_capabilities;
     // Hooks other programs put in front of those, hooked in turn (keep_xinput_capture_first).
     static constexpr std::size_t front_slots = 8;
     std::array<Hook, front_slots> xinput_front;
@@ -617,7 +618,7 @@ void apply_raw_mouse(RawMouse& mouse, bool overlay) {
         applied ? 0ul : GetLastError());
 }
 HWND WINAPI captured_capture(HWND window) {
-    if (block_polled_input() || (overlay_input_access &&
+    if (block_polled_input() || (!overlay_input_access && vr::native_menu_pointer_active()) || (overlay_input_access &&
         GetWindowThreadProcessId(window, nullptr) != GetCurrentThreadId())) return GetCapture();
     return original<HWND(WINAPI*)(HWND)>(input_hooks().capture)(window);
 }
@@ -636,7 +637,7 @@ int WINAPI captured_show_cursor(BOOL show) {
     return original<int(WINAPI*)(BOOL)>(input_hooks().show_cursor)(show);
 }
 BOOL WINAPI captured_physical_cursor(int x, int y) {
-    if (block_polled_input()) return TRUE;
+    if (block_polled_input() || (!overlay_input_access && vr::native_menu_pointer_active())) return TRUE;
     return original<BOOL(WINAPI*)(int, int)>(input_hooks().physical_cursor)(x, y);
 }
 BOOL WINAPI captured_cursor_position(LPPOINT output) {
@@ -694,6 +695,16 @@ DWORD WINAPI captured_xinput(DWORD user, XINPUT_STATE* output) {
         vr::observe_gamepad(user, output->Gamepad.sThumbRX, std::max(output->Gamepad.bLeftTrigger, output->Gamepad.bRightTrigger));
     return result;
 }
+template<std::size_t I>
+DWORD WINAPI captured_capabilities(DWORD user, DWORD flags, XINPUT_CAPABILITIES* output) {
+    DWORD result;
+    {
+        OverlayInputAccess access;
+        result = original<DWORD(WINAPI*)(DWORD, DWORD, XINPUT_CAPABILITIES*)>(input_hooks().xinput_capabilities[I])(user, flags, output);
+    }
+    return vr::virtual_controller_capabilities(user, flags, result, vr::controllers_connected(), output);
+}
+
 template<std::size_t I>
 DWORD WINAPI captured_keystroke(DWORD user, DWORD reserved, PXINPUT_KEYSTROKE output) {
     const auto result = original<DWORD(WINAPI*)(DWORD, DWORD, PXINPUT_KEYSTROKE)>(
@@ -902,7 +913,7 @@ void sync_raw_mouse_registration(bool overlay_owns_pointer) {
     try {
         auto& mouse = raw_mouse();
         std::lock_guard lock(mouse.mutex);
-        const bool overlay = overlay_owns_pointer;
+        const bool overlay = overlay_owns_pointer || vr::native_menu_pointer_active();
         if (overlay == mouse.overridden) return;
         mouse.overridden = overlay;
         // Only a registration that actually blocks the cursor needs replacing.
@@ -954,6 +965,8 @@ bool install_input_capture() {
         reinterpret_cast<void*>(captured_xinput<2, true>), reinterpret_cast<void*>(captured_xinput<3, true>), reinterpret_cast<void*>(captured_xinput<4, true>)};
     const std::array<void*, 5> strokes{reinterpret_cast<void*>(captured_keystroke<0>), reinterpret_cast<void*>(captured_keystroke<1>),
         reinterpret_cast<void*>(captured_keystroke<2>), reinterpret_cast<void*>(captured_keystroke<3>), reinterpret_cast<void*>(captured_keystroke<4>)};
+    const std::array<void*, 5> capabilities{reinterpret_cast<void*>(captured_capabilities<0>), reinterpret_cast<void*>(captured_capabilities<1>),
+        reinterpret_cast<void*>(captured_capabilities<2>), reinterpret_cast<void*>(captured_capabilities<3>), reinterpret_cast<void*>(captured_capabilities<4>)};
     const std::array names{L"xinput1_4.dll", L"xinput1_3.dll", L"xinput9_1_0.dll", L"xinput1_2.dll", L"xinput1_1.dll"};
     std::vector<void*> seen;
     for (std::size_t i = 0; i < names.size(); ++i) {
@@ -967,7 +980,8 @@ bool install_input_capture() {
         };
         if (!hook_export(h.xinput_state[i], "XInputGetState", states[i]) ||
             !hook_export(h.xinput_extended[i], MAKEINTRESOURCEA(100), extended[i]) ||
-            !hook_export(h.xinput_keystroke[i], "XInputGetKeystroke", strokes[i])) return false;
+            !hook_export(h.xinput_keystroke[i], "XInputGetKeystroke", strokes[i]) ||
+            !hook_export(h.xinput_capabilities[i], "XInputGetCapabilities", capabilities[i])) return false;
     }
     const auto direct = LoadLibraryExW(L"dinput8.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
     if (direct) {

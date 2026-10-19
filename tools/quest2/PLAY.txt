@@ -1,0 +1,166 @@
+RESKATE VR - OPENXR CONTROLS / STARTUP INPUT / VR CHAT / PAUSE POINTER v12 (EXPERIMENTAL)
+
+INSTALL
+1. Close skate. and ReSkateLauncher. Back up the files from your current build.
+2. Extract this ZIP and drag its files into your existing ReSkate folder,
+   beside Skate.exe and ReSkateLauncher.exe. Replace files when asked.
+3. Start your headset PC VR runtime (e.g. SteamVR, Meta Link, Virtual Desktop). Open ReSkateLauncher.exe and click LAUNCH VR.
+4. For normal desktop play, click PLAY instead. This disables VR for that session.
+5. Enter gameplay, sit/stand comfortably with your head straight, then press F8.
+
+No PowerShell, Python, compiler or scripts are needed to play.
+
+WHAT CHANGED IN v12
+- CHAT is larger and scales with render resolution. A connected session keeps
+  explicit VR chat available while paused; passive chat hiding no longer
+  disables the button or closes its text panel. Offline shows a join message.
+- Native pause pointer ownership now also releases the game's mouse capture
+  and prevents it from recapturing while the VR ray is active.
+- On the first active VR menu, a one-time message refreshes input activation on
+  the game's own window thread. It runs only if the game is already foreground;
+  it never switches away/back or takes focus from another desktop application.
+- Automated ImGui checks click the actual large button in a connected pause
+  menu, verify offline disabling, and check size scaling. Headset confirmation
+  of the startup input workaround is still needed.
+
+RETAINED v11 FEATURES
+- In a multiplayer session, use CHAT below the VR pause/ReSkate menu to open
+  the live log, text box and Send button. Click the box for a pop-up keyboard.
+  Point the right controller and click keys. Shift, Symbols, Space, Backspace
+  and Clear are available. Send keeps chat open; Close returns to the menu.
+  Offline: Chat is disabled. It uses the existing lobby/server text chat.
+- Native pause-menu rays now request legacy mouse messages and stop the game
+  from clipping/recentering the mouse while pointing. This targets the initial
+  refocus workaround. In-headset confirmation is still needed.
+
+RETAINED v10 FEATURES
+- Sharper source framing is now the default. Existing VR profiles receive it
+  once, then keep later manual changes. It still requires measured native FOV
+  and falls back to the saved correction if that capture is unavailable.
+- Virtual controller device capabilities are now reported during startup,
+  matching the virtual state supplied for input. Standard PLAY and regular
+  gamepad-only mode retain physical-device discovery.
+- The launcher passes foreground permission to the game before its startup
+  splash/main window, targeting the initial need to click away and back.
+  Windows still controls foreground activation; this is not a focus-stealing loop.
+- 90 Hz is not confirmed fixed. A recent test logged about 80 fps at 2165 square
+  with a 90 Hz headset. Try 1800-1920 square with sharper framing enabled and
+  check your frame readout; 72 Hz remains a useful fallback for that setup.
+- See CHANGES_FROM_ORIGINAL.md for a publishable list against the original VR build.
+
+RETAINED v9 FEATURES
+- Move the RIGHT thumbstick up/down while pointing into ReSkate's menu to
+  scroll the hovered panel like a mouse wheel. A dead zone prevents drift.
+- A ray outside the menu does not move the desktop mouse. Native-menu
+  projected clicks are rejected if they land outside the visible game window
+  or on another program. Invalid targets release a drag and require releasing
+  the click control before starting another one. No global cursor trap is used.
+  If a native menu target is physically off the monitor, move/shrink the game
+  window to make it visible rather than clicking a desktop-clamped location.
+- VR TUTORIAL is directly above CHANGELOGS at the bottom left of the launcher.
+- The launcher/tutorial/controller labels now use headset-neutral OpenXR wording.
+  Button labels vary by controller; runtime/controller compatibility still applies.
+- ADDONS > VR > IMAGE > Sharper source framing is on by default and reversible. With
+  measured camera FOV available it removes extra legacy framing correction,
+  using more source pixels without changing the intended headset view scale.
+  Render FOV still provides head-turn margin. If fast turns reveal black edges,
+  turn this option off to return to your previous framing/calibration.
+  Source image used shows approximate source area sampled per eye before warp.
+- Headset presentation pacing avoids an additional desktop V-Sync wait during
+  VR. It is enabled by default and can be disabled in the IMAGE card to compare.
+  It does not remove the game's own frame-rate limiter. For 90 Hz, set the game
+  to Unlimited and V-Sync/Frame generation off, then check actual frame rate.
+  An earlier v9 log ran around 60 fps. 90 Hz artifact reduction is unverified;
+  continue with your stable lower refresh rate if 90 Hz remains uncomfortable.
+
+RETAINED v8 SETUP FEATURES
+- Launcher Settings > VR has one Square size slider (720-3840 pixels).
+  Width and height always match; VR keeps fullscreen/maximize blocked.
+  The size is saved separately from standard PLAY display settings.
+- Your first LAUNCH VR opens a five-page tutorial before starting the game.
+  Finish it to continue; Close cancels. Replay it from Launcher Settings > VR
+  or the VR tutorial / controls guide button in ADDONS > VR.
+- ADDONS > VR > CONTROLS > Input source switches between VR controllers + gamepad
+  and Regular gamepad only. Head tracking stays on. Gamepad-only uses the
+  standard ReSkate keyboard/controller menu bindings to open settings.
+- Each VR controller face button, trigger, grip, stick click and short/hold menu
+  gesture has an action dropdown. Not bound disables that gameplay input.
+  Menu click button is separately configurable. Release inputs after rebinding.
+  Reset VR controller button bindings restores defaults. Bindings save to your profile.
+- Assign a spare VR controller input to Voice talk and choose Hold to talk or
+  Toggle to talk. Voice talk is unbound by default. Toggle mode also applies
+  to the normal keyboard/controller PTT binding while VR is enabled.
+  Enable Voice chat and set microphone volume in ONLINE > VOICE; choose your
+  voice input in Steam. Open microphone mode remains a separate setting.
+  Opening ReSkate menus, losing focus/session or rebinding clears talk state.
+  Live voice capture and Quest UI interaction still need in-game validation.
+
+RETAINED CONTROLS / VR FEATURES
+- PLAY launches the standard game; LAUNCH VR starts the headset session.
+- ADDONS > VR > HUD area size brings the game HUD towards the centre.
+  Defaults to 50%, with a 10%-100% slider. This keeps text readable; some widgets may ignore safe areas.
+- Click and release the LEFT stick to switch first/third person (Xbox or Touch).
+  Switching is paused in menus and while the headset is unfocused. The switch
+  can be disabled in ADDONS > VR.
+- RIGHT stick click recentres the view, including the flat menu panel.
+- Switching first/third person automatically resets the headset origin and
+  follow-camera state, so returning to first person starts centred.
+- Short MENU (hamburger) press opens the normal game menu. Hold about 0.6 s
+  to open ReSkate's menu. The hold no longer sends the filming-mode button.
+- Hold the RIGHT index trigger (the large top trigger) and use the LEFT stick
+  as the D-pad. Release it to move with the stick again. The thumbrest shift
+  still works. This trigger is reserved for D-pad input during gameplay.
+- In menus, point the RIGHT controller at the screen and squeeze its TRIGGER
+  to click or drag. A blue laser/crosshair turns orange while pressed.
+  Release the trigger before the first click after opening a menu.
+  The game window must have desktop focus. Tracking loss releases clicks.
+  ADDONS > VR > Controller menu pointer can turn this feature off.
+  ReSkate's menu now uses the VR pointer as its sole mouse source while active,
+  preventing desktop polling from releasing the trigger during clicks/drags.
+- VR launch locks the game window and resolution list to square sizes and blocks
+  fullscreen/maximize. Standard PLAY retains normal display options.
+- Depth captures are stamped by frame, ignore partial/later effect clears, and
+  must match the kept colour. Resize/recenter/menu transitions discard old pairs.
+  These checks target stale-depth splitting, especially during fast scene motion;
+  physical headset verification is still required.
+- VR eye resolution defaults to 75%, stereo search quality to 24 samples.
+  These reduce reconstruction work, with a sharpness / edge-quality tradeoff.
+  Raise them to 100% / 48 to restore the previous reconstruction quality.
+- Native HUD settings, depth strength, eye alignment, FOV and pairing stay intact.
+- The v3 rigid head camera and push animation fix are retained.
+- The renderer's actual camera now supplies depth-stereo pose metadata.
+- Late head rotation warps eye pixels into a fresh headset orientation before
+  submission. It targets head-turn jitter separately from game animation FPS.
+  The toggle is enabled by default in ADDONS > VR.
+
+New camera defaults are applied once automatically after your profile loads.
+Later changes are saved normally. Head-centred tracking is a toggle in ADDONS > VR.
+F8 resamples the avatar eye origin as well as recentering headset tracking.
+
+SMOOTHNESS / DISPLAY
+This revision changes pose pairing and adds a late rotational image warp.
+If the game cannot reach the headset frame rate, head turns can still stutter.
+For the next test, use a stable refresh rate supported by your headset, game frame limit Unlimited, V-Sync Off,
+frame generation Off and motion blur Off. Lower game graphics until it holds
+that rate. In the GAME's display menu, select Windowed and 1440 x 1440 as a
+starting point. VR launch enforces a square window even after saved settings
+load or the window is resized. Raise resolution once motion is stable.
+
+TEST STATUS
+The release build workflow compiles the Windows DLL and launcher, runs native
+pose/projection, HUD and controller regression tests, and compiles all stereo
+shaders before producing a player artifact. Check BUILD.txt for its source commit.
+A successful build is not a physical headset comfort test.
+This revision has not yet been tested on a physical headset.
+The HUD slider changes native safe-area anchors, preserving text size.
+The HUD is the game HUD included in the reconstructed image; edge placement
+and depth can retain reconstruction artifacts. It is not a separate floating panel. If turning,
+pitch or roll still causes stretching or double vision, stop and report it.
+Do not force yourself to keep testing an uncomfortable image.
+
+This remains stereo reconstructed from one view. It cannot yet promise the
+image stability, latency or quality of a game built for native VR.
+To roll back, close the game and restore the previous DLL and launcher.
+Auto-update and built-in Spotify Connect remain disabled for this test build.
+
+Matching source: https://github.com/Landminegirl/ReSkateVR/tree/quest2-eye-alignment

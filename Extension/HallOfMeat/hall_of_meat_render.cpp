@@ -28,6 +28,7 @@ constexpr float camera_reach = 10.0f;    // metres from the client's camera: the
 
 struct State {
     std::atomic<bool> ready{}; // the hooks prepared
+    std::atomic<RenderViewObserver> observer{};
     bool hooked{};             // and enabled (hook_render): client thread only
     std::uintptr_t base{};
     DrawPacket draw_original{};
@@ -163,6 +164,7 @@ void render_view_hook(std::uintptr_t blackboard, std::uintptr_t current, std::ui
     s.view_original(blackboard, current, previous, jitter);
     LastError error;
     try {
+        if (const auto observer = s.observer.load(std::memory_order_acquire)) observer(current);
         observe_view(current);
     } catch (...) { /* A lost camera is never worth the renderer. */ }
 }
@@ -219,6 +221,7 @@ bool hook_render(bool on) noexcept {
     auto status = HookOk;
     std::size_t changed{};
     for (; changed < targets.size(); ++changed) {
+        if (changed == 1 && s.observer.load(std::memory_order_acquire)) continue;
         status = on ? hook_enable(targets[changed]) : hook_disable(targets[changed]);
         if (status != HookOk) break;
     }
@@ -230,10 +233,24 @@ bool hook_render(bool on) noexcept {
         on ? "enable" : "disable", static_cast<LONG>(status));
     // Both or neither.
     while (changed) {
-        const auto target = targets[--changed];
+        const auto index = --changed;
+        if (index == 1 && s.observer.load(std::memory_order_acquire)) continue;
+        const auto target = targets[index];
         (void)(on ? hook_disable(target) : hook_enable(target));
     }
     return false;
+}
+
+bool set_render_view_observer(RenderViewObserver observer) noexcept {
+    auto& s = state();
+    if (!s.ready.load(std::memory_order_acquire)) return false;
+    const auto before = s.observer.load(std::memory_order_acquire);
+    if (!s.hooked && bool(before) != bool(observer)) {
+        const auto target = render_targets(s.base)[1];
+        if ((observer ? hook_enable(target) : hook_disable(target)) != HookOk) return false;
+    }
+    s.observer.store(observer, std::memory_order_release);
+    return true;
 }
 
 void follow_render(bool wanted) noexcept {

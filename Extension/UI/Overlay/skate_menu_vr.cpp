@@ -1,6 +1,7 @@
 #include "skate_menu_internal.h"
 #include "Extension/VR/vr.h"
 #include "Extension/VR/vr_costume.h"
+#include "Extension/VR/vr_guide.h"
 
 #include <algorithm>
 #include <format>
@@ -27,13 +28,34 @@ bool tiles(SkateMenu& menu, const char* label, const char* tooltip, const char* 
 }
 }
 
-void vr_controls(SkateMenu& menu, const Model& model) {
+void vr_controls(SkateMenu& menu, const Model& model, const CallbacksV3& callbacks) {
     using Limits = vr::Limits;
     const auto vr_status = vr::status();
     auto options = vr::settings();
     bool changed = false;
     const auto set = [&](auto& member) { return [&](auto v) { member = v; changed = true; }; };
 
+    if (primary_button(menu, "VR tutorial / controls guide", true)) ImGui::OpenPopup("VR tutorial");
+    ImGui::SetNextWindowSize(ImVec2(720, 540), ImGuiCond_Appearing);
+    if (ImGui::BeginPopupModal("VR tutorial", nullptr, ImGuiWindowFlags_NoSavedSettings)) {
+        static int page = 0;
+        const auto& pages = vr::guide::pages;
+        ImGui::Text("%d / 5 - %s", page + 1, pages[page].title);
+        ImGui::BeginChild("guide text", ImVec2(0, -ImGui::GetFrameHeightWithSpacing() * 2));
+        ImGui::TextWrapped("%s", pages[page].text);
+        ImGui::EndChild();
+        if (ImGui::Button("Close")) ImGui::CloseCurrentPopup();
+        ImGui::SameLine();
+        ImGui::BeginDisabled(page == 0);
+        if (ImGui::Button("Back")) --page;
+        ImGui::EndDisabled();
+        ImGui::SameLine();
+        if (ImGui::Button(page == 4 ? "Done" : "Next")) {
+            if (page < 4) ++page;
+            else { page = 0; ImGui::CloseCurrentPopup(); }
+        }
+        ImGui::EndPopup();
+    }
     // ---- Headset: on/off, state, the two main actions.
     begin_card(menu, "vr", "VR HEADSET", "OpenXR: Virtual Desktop, Meta Horizon Link, SteamVR");
     if (toggle_row(menu, "VR", "Show first person in your headset. Start the headset's PC VR app first.", options.enabled))
@@ -49,18 +71,50 @@ void vr_controls(SkateMenu& menu, const Model& model) {
         info(menu, "Image", std::format("game {}x{}, headset wants {}x{} per eye", vr_status.image_width,
             vr_status.image_height, vr_status.recommended_width, vr_status.recommended_height));
     }
+    bool game_hud = !model.debug.game_ui_hidden;
+    ImGui::BeginDisabled(!model.debug.ui_available || !callbacks.queue_debug);
+    if (toggle_row(menu, "Show game HUD", "Show the game's scores, objectives and indicators while riding.", game_hud))
+        debug_request(menu, callbacks, {DebugAction::set_game_ui_hidden, !game_hud});
+    ImGui::EndDisabled();
+    ImGui::BeginDisabled(!vr::hud_layout_available());
+    slider(menu, "HUD area size", "Lower brings scores, objectives and indicators towards the centre; text stays readable.",
+        options.hud_area * 100.0f, 10.0f, 100.0f, "%.0f%%", [&](float v) { options.hud_area = v / 100.0f; changed = true; });
+    ImGui::EndDisabled();
+    if (!vr::hud_layout_available()) note("HUD layout control is unavailable for this game build.");
+    if (toggle_row(menu, "View-switch shortcut", "Use the tracked-controller input mapped to Switch first / third person, or L3 on a regular gamepad. Right stick click recentres by default.",
+            options.stick_view_switch)) changed = true;
+    if (toggle_row(menu, "Controller menu pointer", "Point with the right controller and click with its trigger in menus. Off keeps gamepad navigation.",
+            options.menu_pointer)) changed = true;
+    slider(menu, "VR eye resolution", "Lower reduces VR reconstruction work and sharpness without changing the field of view.",
+        options.eye_render_scale * 100.0f, 50.0f, 100.0f, "%.0f%%", [&](float v) { options.eye_render_scale = v / 100.0f; changed = true; });
+    if (toggle_row(menu, "Late head rotation", "Rotate reconstructed pixels into the latest headset orientation before submission.",
+            options.late_rotation)) changed = true;
+    slider(menu, "Stereo search quality", "Lower uses fewer depth samples for speed; raise if object edges break up.",
+        static_cast<float>(options.stereo_steps), 12, 48, "%.0f", [&](float v) { options.stereo_steps = static_cast<int>(v); changed = true; });
     if (primary_button(menu, "Recenter view", vr_status.running)) vr::recenter();
     if (primary_button(menu, "Recommended settings", true)) {
         // Every VR value back to the tested defaults; VR stays on or off.
         vr::Settings recommended;
         recommended.enabled = options.enabled;
         recommended.recenter_key = options.recenter_key;
+        recommended.controllers = options.controllers;
+        recommended.bindings = options.bindings;
+        recommended.pointer_button = options.pointer_button;
+        recommended.voice_toggle = options.voice_toggle;
         options = recommended;
         changed = true;
     }
+    // Quest 2: start with a modest source resolution (2048 square), a
+    // conservative disparity and enough FOV margin for eye reprojection.
+    if (primary_button(menu, "Balanced VR", true)) {
+        options = vr::quest2_balanced(options);
+        changed = true;
+    }
+    note("VR: start with a square window, disable frame generation and V-Sync. "
+         "Use Depth strength 0 to diagnose eye alignment without stereo separation.");
     if (!model.debug.first_person && !options.auto_first_person)
         note("Turn on First person in the CAMERA tab to see the world in 3D. Until then the game shows on a flat screen.");
-    note("For a sharp, smooth image: windowed 2880x2880 in the launcher; V-Sync, frame generation and motion blur off.");
+    note("For smoother turns, use a stable supported headset refresh rate and lower game graphics until FPS matches it. Keep V-Sync, frame generation and motion blur off.");
     end_card();
 
     // ---- Presets.
@@ -176,6 +230,8 @@ void vr_controls(SkateMenu& menu, const Model& model) {
         slider(menu, "Follow", "Seconds for the camera to swing behind your direction of travel.", options.turn_smoothing, 0,
             Limits::turn_smoothing_max, "%.2f s", set(options.turn_smoothing));
     }
+    if (toggle_row(menu, "Head-centred tracking", "Keep the headset at a fixed player eye origin instead of following animated head bob and neck turns.", options.head_centred))
+        changed = true;
     if (toggle_row(menu, "Level horizon", "Tricks don't tilt the view; only turns do.", options.level_horizon))
         changed = true;
     if (toggle_row(menu, "Head movement", "Leaning moves the camera, not just turning your head.", options.positional))
@@ -196,14 +252,47 @@ void vr_controls(SkateMenu& menu, const Model& model) {
 
     // ---- Controls: the headset's controllers as the gamepad.
     begin_card(menu, "vr-controls", "CONTROLS");
-    if (toggle_row(menu, "VR controllers", "Play with the headset's controllers (a gamepad keeps working).", options.controllers))
-        changed = true;
+    int source = options.controllers ? 0 : 1;
+    if (tiles(menu, "Input source", "Head tracking stays on with either choice. Your normal gamepad always works.",
+            "##vr-source", source, {"VR controllers + gamepad", "Regular gamepad only"})) {
+        options.controllers = source == 0; changed = true;
+    }
+    note("Regular gamepad controls: use the game's own controller settings. ReSkate shortcuts are in Settings > Controls. Your configured keyboard menu key still opens this menu.");
+    info(menu, "Microphone", model.multiplayer.voice.transmitting ? "Transmitting" : model.multiplayer.voice.status);
+    int voice_mode = options.voice_toggle ? 1 : 0;
+    if (tiles(menu, "Voice activation", "With VR on, applies to your Voice talk button and normal keyboard/gamepad push-to-talk binding. Open mic is separate in Online > Voice.",
+            "##vr-voice-mode", voice_mode, {"Hold to talk", "Toggle to talk"})) {
+        options.voice_toggle = voice_mode == 1; changed = true;
+    }
+    note("Enable voice chat and adjust microphone volume in Online > Voice. Set your regular push-to-talk key/controller chord there. Toggle mode resets after focus/session loss or input changes.");
     if (options.controllers) {
-        info(menu, "Right hand", "A push, B other push, trigger RB, grip grab (RT)");
-        info(menu, "Left hand", "X board on/off, Y stop, trigger LB, grip grab (LT)");
-        info(menu, "D-pad", "right thumb on the thumbrest + left stick");
-        info(menu, "Menu button", "Start; hold for Back");
-        info(menu, "Recenter", "hold both stick clicks for 1 s");
+        note("Choose an action for each tracked-controller input. Changes save automatically. Release all buttons/triggers after rebinding. Sticks retain their normal axes; D-pad shift reserves the left stick while held.");
+        for (std::size_t i = 0; i < options.bindings.size(); ++i) {
+            ImGui::PushID(static_cast<int>(i));
+            field(menu, vr::controls::input_names[i], "Choose a game action, VR shortcut or Voice talk. Not bound disables this input outside menu pointing.");
+            int& selected = options.bindings[i];
+            if (ImGui::BeginCombo("##binding", vr::controls::action_names[static_cast<std::size_t>(selected)])) {
+                for (int action = 0; action < vr::controls::count; ++action)
+                    if (ImGui::Selectable(vr::controls::action_names[static_cast<std::size_t>(action)], selected == action)) {
+                        selected = action; changed = true;
+                    }
+                ImGui::EndCombo();
+            }
+            ImGui::PopID();
+        }
+        field(menu, "Menu click button", "Menus reserve this input for clicking the right-hand ray; its gameplay action is suppressed while pointing.");
+        const char* pointer_name = options.pointer_button == 10 ? "Not bound" : vr::controls::input_names[static_cast<std::size_t>(options.pointer_button)];
+        if (ImGui::BeginCombo("##pointer-button", pointer_name)) {
+            for (int button = 0; button <= 10; ++button)
+                if (ImGui::Selectable(button == 10 ? "Not bound" : vr::controls::input_names[static_cast<std::size_t>(button)], options.pointer_button == button)) {
+                    options.pointer_button = button; changed = true;
+                }
+            ImGui::EndCombo();
+        }
+        if (primary_button(menu, "Reset VR button bindings", true)) {
+            options.bindings = vr::controls::defaults; options.pointer_button = 5; changed = true;
+        }
+        note("Default: left click switches view, right click recentres; menu short press pauses, hold opens ReSkate. Menu click can be reassigned above. Assign Voice talk to any spare button to talk without the keyboard.");
     }
     end_card();
 
@@ -245,6 +334,13 @@ void vr_controls(SkateMenu& menu, const Model& model) {
                 options.gap_fill, {"Stretch edge", "Background"}))
             changed = true;
     }
+    if (vr_status.source_coverage > 0)
+        info(menu, "Source image used", std::format("about {:.0f}% per eye before head-turn warp", vr_status.source_coverage));
+    ImGui::BeginDisabled(!vr_status.measured_fov_ready);
+    if (toggle_row(menu, "Sharper source framing", "Use more source pixels for the headset by removing extra legacy framing correction. Keeps the Render FOV margin. Off restores your previous framing; fast turns may expose image edges.", options.efficient_fov)) changed = true;
+    ImGui::EndDisabled();
+    if (toggle_row(menu, "Headset presentation pacing", "Avoid a second desktop V-Sync wait while OpenXR paces VR. Does not remove the game's frame-rate limiter. Turn off to compare.", options.headset_pacing)) changed = true;
+    note("For 90 Hz, set game Frame rate limit to Unlimited and V-Sync/Frame generation off. This does not guarantee 90 fps; use the frame readout above to check.");
     slider(menu, "Render FOV", "Rendered field of view relative to the headset's. More covers fast head turns.",
         options.fov_scale, Limits::fov_scale_min, Limits::fov_scale_max, "%.2fx", set(options.fov_scale));
     slider(menu, "Zoom fix", "If the world looks magnified, raise this until objects look real-size.", options.fov_correction,
@@ -261,7 +357,7 @@ void vr_controls(SkateMenu& menu, const Model& model) {
     if (advanced) {
         slider(menu, "World scale", "Above 1 the world looks smaller.", options.world_scale, Limits::world_scale_min,
             Limits::world_scale_max, "%.2fx", set(options.world_scale));
-        field(menu, "Eye pairing", "Presents between a camera frame and its image. Try the next value if the world looks "
+        field(menu, "Legacy eye pairing", "Used when native renderer pairing is unavailable. Presents between camera and image. Try another value if the world looks "
             "doubled or depth looks inside out.");
         int lag = options.frame_lag;
         if (ImGui::SliderInt("##vr-lag", &lag, 0, Limits::frame_lag_max, "%d", ImGuiSliderFlags_AlwaysClamp)) {

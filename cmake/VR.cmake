@@ -7,7 +7,11 @@ add_library(dingosdk_vr STATIC
     Extension/VR/vr_depth.cpp
     Extension/VR/vr_stereo.cpp
     Extension/VR/vr_input.cpp
-    Extension/VR/vr_gamepad.cpp)
+    Extension/VR/vr_gamepad.cpp
+    Extension/VR/vr_hud.cpp
+    Extension/VR/vr_render_pose.cpp
+    Extension/VR/vr_pointer.cpp
+    Extension/VR/vr_pointer_gpu.cpp)
 target_include_directories(dingosdk_vr SYSTEM PUBLIC "${PROJECT_SOURCE_DIR}/External/openxr/include")
 target_link_libraries(dingosdk_vr PUBLIC dingosdk_logging dingosdk_hooks)
 
@@ -17,4 +21,11 @@ if(DINGOSDK_BUILD_VR_TESTS)
     add_executable(dingosdk_vr_math_tests Extension/VR/Test/vr_math_tests.cpp)
     target_include_directories(dingosdk_vr_math_tests PRIVATE "${PROJECT_SOURCE_DIR}")
     add_test(NAME vr_math COMMAND dingosdk_vr_math_tests)
+    add_executable(dingosdk_vr_launch_tests Launcher/Test/vr_launch_tests.cpp)
+    target_include_directories(dingosdk_vr_launch_tests PRIVATE "${PROJECT_SOURCE_DIR}")
+    add_test(NAME vr_launch COMMAND dingosdk_vr_launch_tests)
+    add_executable(dingosdk_vr_chat_ui_tests Extension/VR/Test/vr_chat_ui_tests.cpp)
+    target_include_directories(dingosdk_vr_chat_ui_tests PRIVATE "${PROJECT_SOURCE_DIR}")
+    target_link_libraries(dingosdk_vr_chat_ui_tests PRIVATE dingosdk_imgui)
+    add_test(NAME vr_chat_ui COMMAND dingosdk_vr_chat_ui_tests)
 endif()

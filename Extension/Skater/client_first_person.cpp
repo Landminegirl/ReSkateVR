@@ -264,7 +264,7 @@ std::optional<bool> first_person_on_foot(std::uintptr_t base, std::uintptr_t cli
 // Writes the head camera into the rows (right, up, backward, position) of a
 // native camera matrix, leaving each row's fourth lane as the camera had it.
 first_person::Vec3 first_person_head_matrix(std::uintptr_t base, std::uintptr_t component, std::array<float, 16>& matrix,
-    float* chest_heading) {
+    float* chest_heading, float* trajectory_heading) {
     std::uintptr_t holder{};
     source_require(first_person_read(component + 0xa0, &holder, 8) && holder, "Skater animation is unavailable.");
     const auto pose = multiplayer::read_native_pose_layout(first_person_read, base, holder, 512);
@@ -274,7 +274,11 @@ first_person::Vec3 first_person_head_matrix(std::uintptr_t base, std::uintptr_t 
     first_person::Vec3 origin{};
     for (const auto joint : first_person_head_chain) {
         head = first_person_child(head, pose.buffer, joint);
-        if (joint == 1) origin = head.position;
+        if (joint == 1) {
+            origin = head.position;
+            // AITrajectory places the skater in the world; upper spine/head animate beneath it.
+            if (trajectory_heading) *trajectory_heading = 2 * std::atan2(head.rotation[1], head.rotation[3]);
+        }
         if (joint == 45 && chest_heading) {
             // The upper spine, with the head's axes (forward is local +Y).
             // Unknown (NaN) with the chest within 30 degrees of vertical (lying, flips): its
@@ -340,7 +344,7 @@ void first_person_on_render(std::uintptr_t animation_interface) noexcept {
             // On the board: the board under the skater, or a riding state (100-499: rolling, air,
             // grinds), since the board leaves the feet in tricks.
             const bool riding = latest.on_board || (latest.physics_state >= 100 && latest.physics_state < 500);
-            const vr::BodyPose body{latest.origin, latest.chest_heading, riding, latest.physics_state, latest.board};
+            const vr::BodyPose body{latest.origin, latest.chest_heading, riding, latest.physics_state, latest.board, latest.trajectory_heading};
             if (!vr::apply_camera(view, vr::CameraWriter::render, &body)) view = matrix;
             arm.transform(arm.camera, &view);
             arm.matrix = matrix;
@@ -359,7 +363,8 @@ void first_person_on_animation(std::uintptr_t component) noexcept {
         head[15] = 1;
         const auto base = arm.watched_base.load(std::memory_order_acquire);
         float chest = std::numeric_limits<float>::quiet_NaN();
-        const auto origin = first_person_head_matrix(base, component, head, &chest);
+        float trajectory_heading = std::numeric_limits<float>::quiet_NaN();
+        const auto origin = first_person_head_matrix(base, component, head, &chest, &trajectory_heading);
         std::array<float, 16> board{};
         const bool on_board = first_person_on_board(base, component, origin, &board);
         // The skater's physics state (the same context No Bail checks): core +0x3c0, state +0x1414.
@@ -370,7 +375,7 @@ void first_person_on_animation(std::uintptr_t component) noexcept {
             (void)first_person_read(context + 0x1414, &physics_state, 4);
         {
             std::lock_guard lock(arm.snapshot_mutex);
-            arm.latest = {head, origin, now, chest, on_board, physics_state, board};
+            arm.latest = {head, origin, now, chest, on_board, physics_state, board, trajectory_heading};
             ++arm.captures;
         }
         const bool riding = on_board || (physics_state >= 100 && physics_state < 500); // riding, air and grinds count

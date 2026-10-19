@@ -14,6 +14,9 @@ bool start_render(std::uintptr_t image_base) noexcept;
 // Client tick: both hooks on while Hall of Meat is, off otherwise, so a renderer it is switched off
 // for never calls it. False when they could not be changed (logged; both stay as they were).
 bool hook_render(bool on) noexcept;
+using RenderViewObserver = void (*)(std::uintptr_t view) noexcept;
+// Retains the view hook independently of Hall of Meat's draw-packet hook.
+bool set_render_view_observer(RenderViewObserver observer) noexcept;
 // Client tick: while `wanted` (a bail shows), which render objects are the local skater's
 // (no_bail.h no_bail_skater), riding and walking; otherwise both hooks pass every call straight on.
 void follow_render(bool wanted) noexcept;

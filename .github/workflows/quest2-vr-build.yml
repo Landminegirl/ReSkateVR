@@ -1,0 +1,61 @@
+name: Experimental OpenXR VR build
+on:
+  workflow_dispatch:
+  push:
+    branches: [quest2-eye-alignment]
+  pull_request:
+    branches: [vr]
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check projection reference and embedded shaders
+        shell: pwsh
+        run: |
+          python -m unittest discover -s tools/quest2/tests -v
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python tools/quest2/check_shader.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Configure
+        run: cmake --preset vs2022-x64 -DDINGOSDK_CARGO=OFF -DDINGOSDK_BUILD_VR_TESTS=ON -DDINGOSDK_LAUNCHER_AUTO_UPDATE=OFF
+      - name: Build
+        run: cmake --build --preset release --parallel 4 --target dingosdk_runtime dingosdk_launcher dingosdk_vr_math_tests dingosdk_vr_launch_tests dingosdk_vr_chat_ui_tests
+      - name: Check native VR math
+        run: ctest --test-dir build/vs2022-x64 -C Release -R "vr_(math|launch|chat_ui)" --output-on-failure
+      - name: Stage test binaries
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item build/vs2022-x64/Release/ReSkate.dll dist/
+          Copy-Item build/vs2022-x64/Release/ReSkateLauncher.exe dist/
+          Copy-Item tools/quest2/PLAY.txt dist/READ_ME_FIRST.txt
+          Copy-Item tools/quest2/CHANGES_FROM_ORIGINAL.md dist/CHANGES_FROM_ORIGINAL.md
+          $sourceCommit = git rev-parse HEAD
+          "OpenXR chat / pause pointer v12`nSource commit: $sourceCommit`nBuilt and tested by GitHub Actions. Physical headset validation pending." | Set-Content dist/BUILD.txt
+          git archive --format=zip --output=ReSkateVR-OpenXR-v12-source.zip HEAD
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Copy-Item External/openxr/LICENSE dist/LICENSE-OpenXR.txt
+          python tools/quest2/fetch_openxr_loader.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Get-ChildItem -File -Filter '*LICENSE*' | Copy-Item -Destination dist/
+          $externalRoot = (Resolve-Path External).Path
+          Get-ChildItem External -Recurse -File | Where-Object { $_.Name -match '(?i)(license|copying|notice|ofl)' } | ForEach-Object {
+            $destination = Join-Path 'dist/licenses' ([IO.Path]::GetRelativePath($externalRoot, $_.FullName))
+            New-Item -ItemType Directory -Force (Split-Path -Parent $destination) | Out-Null
+            Copy-Item -LiteralPath $_.FullName -Destination $destination
+          }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ReSkateVR-OpenXR-experimental
+          path: dist/
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ReSkateVR-OpenXR-v12-source
+          path: ReSkateVR-OpenXR-v12-source.zip
+          if-no-files-found: error

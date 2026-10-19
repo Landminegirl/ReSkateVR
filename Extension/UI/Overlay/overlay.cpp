@@ -115,6 +115,8 @@ HRESULT STDMETHODCALLTYPE present(IDXGISwapChain* chain, UINT interval, UINT fla
     PresentGuard guard;
     if (guard.outermost) guarded_render(chain, flags);
     const bool observed = guard.outermost && observe_present(chain, flags);
+    // OpenXR already paced this frame. Do not add a second desktop V-Sync wait.
+    if (observed && dingosdk::vr::headset_pacing_active()) interval = 0;
     const HRESULT result = original<PresentFn>(state().present)(chain, interval, flags);
     complete_present(observed);
     if (result == DXGI_ERROR_DEVICE_REMOVED || result == DXGI_ERROR_DEVICE_RESET) {
@@ -130,6 +132,7 @@ HRESULT STDMETHODCALLTYPE present1(IDXGISwapChain1* chain, UINT interval, UINT f
     PresentGuard guard;
     if (guard.outermost) guarded_render(chain, flags);
     const bool observed = guard.outermost && observe_present(chain, flags);
+    if (observed && dingosdk::vr::headset_pacing_active()) interval = 0;
     const HRESULT result = original<Present1Fn>(state().present1)(chain, interval, flags, parameters);
     complete_present(observed);
     if (result == DXGI_ERROR_DEVICE_REMOVED || result == DXGI_ERROR_DEVICE_RESET) {
@@ -174,6 +177,7 @@ HRESULT STDMETHODCALLTYPE resize(IDXGISwapChain* chain, UINT count, UINT width, 
     DXGI_FORMAT format, UINT flags) {
     std::lock_guard lock(state().render_mutex);
     if (!before_resize(chain)) return DXGI_ERROR_WAS_STILL_DRAWING;
+    if (state().force_square && width && height) width = height = std::min(width, height);
     return original<ResizeFn>(state().resize)(chain, count, width, height, format, flags);
 }
 template<std::size_t I>
@@ -181,6 +185,7 @@ HRESULT STDMETHODCALLTYPE resize_more(IDXGISwapChain* chain, UINT count, UINT wi
     DXGI_FORMAT format, UINT flags) {
     std::lock_guard lock(state().render_mutex);
     if (!before_resize(chain)) return DXGI_ERROR_WAS_STILL_DRAWING;
+    if (state().force_square && width && height) width = height = std::min(width, height);
     return original<ResizeFn>(state().resize_more[I])(chain, count, width, height, format, flags);
 }
 template<std::size_t I>
@@ -188,6 +193,7 @@ HRESULT STDMETHODCALLTYPE resize1_more(IDXGISwapChain3* chain, UINT count, UINT 
     DXGI_FORMAT format, UINT flags, const UINT* masks, IUnknown* const* queues) {
     std::lock_guard lock(state().render_mutex);
     if (!before_resize(chain)) return DXGI_ERROR_WAS_STILL_DRAWING;
+    if (state().force_square && width && height) width = height = std::min(width, height);
     return original<Resize1Fn>(state().resize1_more[I])(chain, count, width, height, format, flags, masks, queues);
 }
 // The module an address is in, for the log.
@@ -285,6 +291,7 @@ HRESULT STDMETHODCALLTYPE resize1(IDXGISwapChain3* chain, UINT count, UINT width
             if (unsupported_queues) replacement_queue.Reset();
         }
     }
+    if (state().force_square && width && height) width = height = std::min(width, height);
     const auto result = original<Resize1Fn>(state().resize1)(
         chain, count, width, height, format, flags, masks, queues);
     // DXGI owns the queue transition. Commit the candidate only when the real
@@ -305,9 +312,11 @@ HRESULT STDMETHODCALLTYPE resize1(IDXGISwapChain3* chain, UINT count, UINT width
 HRESULT STDMETHODCALLTYPE create(IDXGIFactory* factory, IUnknown* device,
     DXGI_SWAP_CHAIN_DESC* description, IDXGISwapChain** output) {
     DXGI_SWAP_CHAIN_DESC windowed{};
-    if (state().force_windowed && description && !description->Windowed) {
+    if (state().force_windowed && description) {
         windowed = *description;
         windowed.Windowed = TRUE;
+        if (state().force_square && windowed.BufferDesc.Width && windowed.BufferDesc.Height)
+            windowed.BufferDesc.Width = windowed.BufferDesc.Height = std::min(windowed.BufferDesc.Width, windowed.BufferDesc.Height);
         description = &windowed;
         dingosdk::logging::printf(dingosdk::logging::Level::debug, dingosdk::logging::Channel::graphics, "Windowed startup: changed initial swapchain fullscreen request to windowed");
     }
@@ -322,6 +331,12 @@ HRESULT STDMETHODCALLTYPE create_hwnd(IDXGIFactory2* factory, IUnknown* device, 
     const DXGI_SWAP_CHAIN_DESC1* description, const DXGI_SWAP_CHAIN_FULLSCREEN_DESC* fullscreen,
     IDXGIOutput* restrict_output, IDXGISwapChain1** output) {
     DXGI_SWAP_CHAIN_FULLSCREEN_DESC windowed{};
+    DXGI_SWAP_CHAIN_DESC1 square{};
+    if (state().force_square && description) {
+        square = *description;
+        if (square.Width && square.Height) square.Width = square.Height = std::min(square.Width, square.Height);
+        description = &square;
+    }
     if (state().force_windowed && fullscreen && !fullscreen->Windowed) {
         windowed = *fullscreen;
         windowed.Windowed = TRUE;
@@ -364,36 +379,38 @@ template<class Mode, class Function, class Output>
 HRESULT modes_with_extra(Function list, Output* output, DXGI_FORMAT format, UINT flags, UINT* count, Mode* modes) {
     const auto extra = extra_modes();
     if (extra.empty() || !count) return list(output, format, flags, count, modes);
-    const auto added = static_cast<UINT>(extra.size());
-    if (!modes) {
-        const HRESULT result = list(output, format, flags, count, nullptr);
-        if (SUCCEEDED(result) && *count) *count += added;
-        return result;
-    }
-    if (*count <= added) return list(output, format, flags, count, modes);
-    UINT real = *count - added;
-    const HRESULT result = list(output, format, flags, &real, modes);
-    *count = real;
-    if (FAILED(result) || !real) return result;
+    UINT real = 0;
+    HRESULT result = list(output, format, flags, &real, nullptr);
+    if (FAILED(result) || !real) { *count = real; return result; }
+    std::vector<Mode> available(real);
+    result = list(output, format, flags, &real, available.data());
+    if (FAILED(result)) { *count = real + static_cast<UINT>(extra.size()); return result; }
+    available.resize(real);
+    if (available.empty()) { *count = 0; return result; }
     // Each extra size copies the format, refresh rate and scaling of the largest real mode.
-    const Mode model = modes[real - 1];
-    UINT total = real;
+    const Mode model = available.back();
+    if (state().force_square)
+        std::erase_if(available, [](const Mode& mode) { return mode.Width != mode.Height; });
     for (const auto& [width, height] : extra) {
-        if (std::any_of(modes, modes + total, [&](const Mode& m) { return m.Width == width && m.Height == height; })) continue;
-        modes[total] = model;
-        modes[total].Width = width;
-        modes[total].Height = height;
-        ++total;
+        if (state().force_square && width != height) continue;
+        if (std::any_of(available.begin(), available.end(), [&](const Mode& m) { return m.Width == width && m.Height == height; })) continue;
+        auto mode = model;
+        mode.Width = width;
+        mode.Height = height;
+        available.push_back(mode);
     }
-    std::stable_sort(modes, modes + total, [](const Mode& a, const Mode& b) {
+    std::stable_sort(available.begin(), available.end(), [](const Mode& a, const Mode& b) {
         return a.Width != b.Width ? a.Width < b.Width : a.Height < b.Height;
     });
-    *count = total;
+    const UINT capacity = *count;
+    *count = static_cast<UINT>(available.size());
+    if (modes && capacity < *count) return DXGI_ERROR_MORE_DATA;
+    if (modes) std::copy(available.begin(), available.end(), modes);
     static std::atomic<bool> logged{};
     if (!logged.exchange(true))
         dingosdk::logging::printf(dingosdk::logging::Level::info, dingosdk::logging::Channel::graphics,
-            "Display modes: added %u VR sizes (%ux%u to %ux%u) to the game's resolution list.", total - real,
-            vr_sizes[0], vr_sizes[0], vr_sizes[std::size(vr_sizes) - 1], vr_sizes[std::size(vr_sizes) - 1]);
+            "Display modes: offering %u sizes (%ux%u to %ux%u); square-only VR mode %s.", *count,
+            vr_sizes[0], vr_sizes[0], vr_sizes[std::size(vr_sizes) - 1], vr_sizes[std::size(vr_sizes) - 1], state().force_square ? "on" : "off");
     return result;
 }
 HRESULT STDMETHODCALLTYPE display_modes(IDXGIOutput* output, DXGI_FORMAT format, UINT flags, UINT* count, DXGI_MODE_DESC* modes) {
@@ -478,6 +495,7 @@ bool start_overlay(const dingosdk::overlay::CallbacksV3* callbacks) {
     if (s.started || s.stop.load()) return false;
     dingosdk::overlay::initialize_graphics_diagnostics();
     s.force_windowed = dingosdk::overlay::graphics_option_enabled(L"RESKATE_FORCE_WINDOWED");
+    s.force_square = s.force_windowed && dingosdk::overlay::graphics_option_enabled(L"RESKATE_VR_LAUNCH");
     if (s.force_windowed) {
         const auto size = [](const wchar_t* name) -> UINT {
             wchar_t text[16]{};

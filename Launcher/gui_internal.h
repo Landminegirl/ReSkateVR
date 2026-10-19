@@ -186,6 +186,8 @@ inline PadFeed* g_pad_feed{};
 // ---------------------------------------------------------------- settings
 
 struct Settings {
+    int vr_size{2048};
+    int vr_guide_version{};
     bool windowed{};
     int width{1920};
     int height{1080};
@@ -279,6 +281,7 @@ public:
     // The password only lives in memory until DepotDownloader asks for it; it
     // may be empty when DepotDownloader remembers the login.
     void download(bool validate, bool qr, std::string password);
+    void select_launch(bool vr);
     void play();
     void cancel();
     // Answers the pending Steam prompt; nothing cancels the download.
@@ -305,6 +308,7 @@ private:
     bool has_answer_{};
     std::thread worker_;
     std::atomic<bool> busy_{};
+    std::atomic<bool> vr_launch_{};
     std::atomic<bool> cancel_{};
     std::atomic<bool> restart_{};
     std::atomic<bool> ignore_mod_problems_{};
@@ -402,6 +406,8 @@ struct GamePages {
 
 // Panels the main screen can show; one at a time.
 struct Ui {
+    bool vr_guide{}, vr_guide_launch{};
+    int vr_guide_page{};
     bool settings{};
     GamePages game;
     bool changelog{};
@@ -664,6 +670,7 @@ void legal_window(const Fonts& fonts, ImVec2 size, Ui& ui);
 void check_legal_versions(Ui& ui, const Settings& settings);
 // "I agree" to the current versions, or quit.
 void legal_agreement_window(Launcher& launcher, const Fonts& fonts, ImVec2 size, Ui& ui, HWND window);
+void vr_guide_window(Launcher& launcher, const Fonts& fonts, ImVec2 size, Ui& ui);
 void settings_window(Launcher& launcher, const Fonts& fonts, ImVec2 size, Ui& ui, HWND window);
 void mods_window(Launcher& launcher, const Fonts& fonts, ImVec2 size, Ui& ui, ModsPanel& panel, HWND window);
 // Shown instead of launching when the merge left mods out.
