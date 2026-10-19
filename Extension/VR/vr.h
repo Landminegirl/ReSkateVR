@@ -262,6 +262,9 @@ struct MenuPointer {
 // Read by the overlay on its render thread; inactive outside the VR menu panel.
 MenuPointer menu_pointer() noexcept;
 void cancel_menu_pointer() noexcept;
+bool native_menu_pointer_active() noexcept;
+void set_chat_shortcut_region(float left, float top, float right, float bottom) noexcept;
+void set_chat_keyboard_open(bool open) noexcept;
 bool headset_pacing_active() noexcept;
 // Same for the game's own main or pause menu (client thread).
 void set_game_menu(bool open) noexcept;

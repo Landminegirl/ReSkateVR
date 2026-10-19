@@ -1,4 +1,4 @@
-RESKATE VR - OPENXR CONTROLS / STARTUP INPUT / FRAMING v10 (EXPERIMENTAL)
+RESKATE VR - OPENXR CONTROLS / STARTUP INPUT / VR CHAT / PAUSE POINTER v11 (EXPERIMENTAL)
 
 INSTALL
 1. Close skate. and ReSkateLauncher. Back up the files from your current build.
@@ -10,7 +10,17 @@ INSTALL
 
 No PowerShell, Python, compiler or scripts are needed to play.
 
-WHAT CHANGED IN v10
+WHAT CHANGED IN v11
+- In a multiplayer session, use CHAT below the VR pause/ReSkate menu to open
+  the live log, text box and Send button. Click the box for a pop-up keyboard.
+  Point the right controller and click keys. Shift, Symbols, Space, Backspace
+  and Clear are available. Send keeps chat open; Close returns to the menu.
+  Offline: Chat is disabled. It uses the existing lobby/server text chat.
+- Native pause-menu rays now request legacy mouse messages and stop the game
+  from clipping/recentering the mouse while pointing. This targets the initial
+  refocus workaround. In-headset confirmation is still needed.
+
+RETAINED v10 FEATURES
 - Sharper source framing is now the default. Existing VR profiles receive it
   once, then keep later manual changes. It still requires measured native FOV
   and falls back to the saved correction if that capture is unavailable.

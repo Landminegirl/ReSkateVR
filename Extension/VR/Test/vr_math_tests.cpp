@@ -4,6 +4,7 @@
 #include "Extension/VR/vr_math.h"
 #include "Extension/VR/vr.h"
 #include <cstdio>
+#include "Extension/VR/vr_chat_text.h"
 #ifdef _WIN32
 #include "Extension/VR/vr_xinput.h"
 #endif
@@ -45,6 +46,26 @@ Quat pitch(float radians) { return {std::sin(radians / 2), 0, 0, std::cos(radian
 }
 
 int main() {
+    {
+        using namespace dingosdk::vr::chat_text;
+        char text[6]{};
+        CHECK(append(text, sizeof(text), "abc"));
+        CHECK(!append(text, sizeof(text), "def") && std::string_view(text) == "abc");
+        CHECK(append(text, sizeof(text), "\xc3\xa9"));
+        backspace(text);
+        CHECK(std::string_view(text) == "abc");
+        backspace(text); backspace(text); backspace(text); backspace(text);
+        CHECK(!text[0]);
+        CHECK(!append(text, sizeof(text), "abcdef"));
+        CHECK(!sendable(" \t\n") && sendable("hi"));
+        char limited[201]{};
+        for (int i = 0; i < 200; ++i) CHECK(append(limited, sizeof(limited), "a"));
+        CHECK(!append(limited, sizeof(limited), "b") && std::strlen(limited) == 200);
+        char emoji[8]{};
+        CHECK(append(emoji, sizeof(emoji), "x\xf0\x9f\x98\x80"));
+        backspace(emoji);
+        CHECK(std::string_view(emoji) == "x");
+    }
     {
         CHECK(dingosdk::vr::Settings{}.efficient_fov);
         CHECK(dingosdk::vr::virtual_controller_requested(false, true, false, '1'));

@@ -1,3 +1,129 @@
+# ReSkateVR — OpenXR update: changes from the original VR build
+
+*********************************************************************************************************************************************
+
+Built on **cesarcc2’s ReSkateVR** and the work of the **ReSkate contributors**.
+This list compares our update with the original VR branch at commit
+[`b19a2c9`](https://github.com/Landminegirl/ReSkateVR/commit/b19a2c920364223fffc874fd2350806aac8fdcdf).
+OpenXR support, the original VR camera/stereo modes and the underlying game/mod
+remain the original projects’ work. The changes below are our additions and revisions.
+
+## Installation and launching
+
+- Added separate **PLAY** and **LAUNCH VR** buttons, so the same installation can
+  start in desktop mode or VR without editing files.
+
+  <img width="1447" height="752" alt="reskatemainscreen" src="https://github.com/user-attachments/assets/b6506b27-7c15-45a2-a2a5-5cf87b218b8f" />
+
+- Packaged a drag-and-drop Windows download with the launcher, VR runtime and
+  OpenXR loader. Players do not need PowerShell, Python or a compiler.
+- Added a dedicated launcher **VR settings** page with a saved square-resolution
+  slider. VR and standard PLAY keep separate display preferences.
+- Locked VR to a square window, including after resizing. Fullscreen and maximize
+  requests are blocked to avoid accidentally breaking the VR view.
+- Improved startup virtual-controller discovery and launcher-to-game foreground
+  permission handoff, targeting controllers not responding until refocusing.
+
+## Camera, tracking and image clarity
+
+- Corrected eye-image alignment for the headset’s actual OpenXR eye projections.
+- Reworked head-centred tracking to use a stable player eye origin rather than
+  animated neck/head movement, reducing the offset pivot when looking around.
+- Removed push-animation yaw from the head camera to address kick/push snapping.
+- Reset headset origin and follow-camera state when switching first/third person,
+  addressing the view becoming offset after a switch.
+- Added pairing with the renderer’s actual camera/FOV and late head-rotation
+  reprojection to address head-turn jitter separately from game animation rate.
+- Added checks to keep scene colour, depth and camera metadata together. Old pairs
+  are discarded across resolution changes, menu transitions and recentering.
+- Added **Sharper source framing**, now enabled by default. With measured camera
+  FOV available, it reduces wasted source-image area while preserving the intended
+  headset viewing scale. It can be disabled to restore the previous framing.
+- Added source-image coverage and frame-rate diagnostics, adjustable eye
+  reconstruction resolution and stereo search quality.
+- Added optional headset presentation pacing to avoid an extra desktop V-Sync wait
+  while OpenXR is pacing the session.
+
+## HUD and menus
+
+- Added game-HUD controls to the VR menu.
+- Added a **HUD area** slider, defaulting to **50%**, adjustable from **10–100%**.
+  It brings indicators towards the centre while preserving text size.
+- Added a right-controller ray/laser and pointer for interacting with menu panels.
+- Added configurable click input and trigger clicking/dragging, including fixes for
+  ReSkate’s menu releasing VR clicks through desktop-mouse polling.
+- Added right-thumbstick up/down scrolling for the menu under the ray.
+- Added guards against off-panel and out-of-window ray clicks, including projected
+  targets landing on another desktop program when the VR window is larger than
+  the monitor. Invalid targets release dragging and require release before rearming.
+
+## Controls and voice
+
+- Added a default **left-stick click/release** shortcut to switch first/third person.
+
+<img width="2560" height="1440" alt="thirdpersonswap" src="https://github.com/user-attachments/assets/049a6175-48dd-46ae-a21e-9579debfa0bc" />
+
+- Added default **right-stick click** recentering for gameplay and the flat menu panel.
+
+<img width="2560" height="1440" alt="recenter camera player" src="https://github.com/user-attachments/assets/06f7ffa4-ff34-4cb2-9419-856e20edceb3" />
+
+- Changed the menu button: short press opens the game menu; hold opens ReSkate’s
+  menu instead of sending the filming-mode button.
+
+  <img width="2560" height="1440" alt="Menusettingsbutton" src="https://github.com/user-attachments/assets/8e5adad7-1379-4303-be35-e4f90e6b01c0" />
+
+- Added default **right index trigger + left stick** D-pad input, retaining the
+  thumbrest alternative. The hold remains active through the menu it opens.
+
+  <img width="2560" height="1440" alt="quickmenusettings" src="https://github.com/user-attachments/assets/7dfb7cb4-51a3-448a-a14a-67b154c5e58d" />
+
+- Added saved, remappable actions for face buttons, triggers, grips, stick clicks
+  and short/hold menu gestures. The ray-click button is separately configurable.
+
+  <img width="1012" height="710" alt="rebinbg" src="https://github.com/user-attachments/assets/533c00b1-efb2-42d3-af27-2adc14e8b20c" />
+
+- Added an explicit **Regular gamepad only** option alongside VR controllers plus
+
+  <img width="765" height="147" alt="gamepoad" src="https://github.com/user-attachments/assets/e713af7c-7ff3-4428-bf04-eed881bcba51" />
+
+  gamepad, while keeping headset tracking enabled.
+- Added a bindable VR **Voice talk** action and **Hold to talk / Toggle to talk**
+  modes. In VR, the chosen mode also works with existing keyboard/gamepad PTT binds.
+- Kept the existing voice permission, host, focus, menu and microphone gates;
+  input/session changes clear the talk latch. Voice chat still needs enabling in
+  **ONLINE → VOICE**, and microphone selection still uses Steam voice settings.
+
+## Tutorial and usability
+
+- Added a first-VR-launch tutorial covering controls, menu interaction, HUD,
+  comfort/performance settings, voice chat and regular controllers.
+- Added **VR TUTORIAL** directly above **CHANGELOGS** in the launcher, with replay
+  access from launcher settings and the in-game VR menu too.
+- Generalized user-facing VR wording to OpenXR headsets and tracked controllers.
+  This does not mean every headset/controller layout has been tested.
+- Saved personal VR tuning and button mappings to the profile, with reset options.
+
+## Current limitations and testing
+
+- **90 Hz stutter/tearing is not confirmed fixed.** Rendering load and resolution
+  still matter. The tested setup has been smoother at 72 Hz; use a refresh rate the
+  game can sustain. Lowering the square source resolution can help.
+- Stereo is still reconstructed from one game view. Near-object edges and fast
+  turns can expose reconstruction artifacts or missing image areas.
+- The startup controller/focus changes still need in-headset confirmation. A
+  successful Windows build and automated checks do not establish comfort or
+  compatibility with every runtime/controller.
+- Experimental player packages keep binary auto-update and built-in Spotify
+  Connect disabled. Source and dependency licences are supplied with the builds.
+
+
+
+
+
+*********************************************************************************************************************************************
+
+
+
 # ReSkate
 
 play it offline, host your own lobbies and dedicated servers, and mod it.

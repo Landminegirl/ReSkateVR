@@ -626,7 +626,7 @@ ChatPanel& chat_panel() {
     static ChatPanel value;
     return value;
 }
-std::atomic<bool> chat_wanted{false};
+std::atomic<bool> chat_wanted{false}, chat_keyboard_open{false};
 
 // The chat as a quad on the left controller (above the wrist, tilted towards the eyes), or at
 // the lower left of the view. Opaque: the overlay draws it on its own dark background.
@@ -788,7 +788,8 @@ Status status() {
     return result;
 }
 
-bool wants_chat_panel() noexcept { return chat_wanted.load(std::memory_order_acquire); }
+void set_chat_keyboard_open(bool open) noexcept { chat_keyboard_open.store(open, std::memory_order_release); }
+bool wants_chat_panel() noexcept { return chat_wanted.load(std::memory_order_acquire) && !chat_keyboard_open.load(std::memory_order_acquire); }
 void submit_chat_panel(ID3D12Resource* texture, std::uint32_t width, std::uint32_t height) noexcept {
     auto& panel = chat_panel();
     panel.texture = texture;

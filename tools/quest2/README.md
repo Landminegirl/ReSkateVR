@@ -243,3 +243,17 @@ The inspected 90 Hz run was ~80 presents/s at2165square (camera60/s). Sharper fr
 was active and headset presentation pacing was off. This is consistent with a frame
 budget issue, not evidence that 90 Hz artifacts are resolved. The public change list
 is CHANGES_FROM_ORIGINAL.md; it credits original VR work separately from our changes.
+
+## v11: VR chat and native pause-pointer ownership
+
+CHAT appears below the flat pause/ReSkate menu in VR; it is disabled offline.
+An open VR chat uses the main ray-interactive theater panel instead of the passive
+hand chat texture. Existing multiplayer chat transport/history, 200-byte limits
+and typing notices are reused. The keyboard edits a bounded UTF-8 buffer, and
+failed queue requests preserve drafts. Desktop T/Enter input remains available.
+
+Native-menu rays now extend legacy raw-mouse registration overrides and cursor
+clip/recenter guards beyond overlay-only menus. Existing foreground/window/monitor
+target checks and release-before-arm behavior remain. Hardware confirmation of
+the initial refocus workaround is pending.
+

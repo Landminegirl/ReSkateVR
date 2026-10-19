@@ -121,7 +121,7 @@ void sync_menu_cursor(bool release) {
         std::lock_guard lock(s.cursor_mutex);
         const auto clip = original<ClipCursorFn>(s.clip_cursor);
         if (!clip) return;
-        const bool own = !release && owns_menu_cursor(s);
+        const bool own = !release && (owns_menu_cursor(s) || dingosdk::vr::native_menu_pointer_active());
         changed = own != s.cursor_released;
         if (own) {
             // Freed when the menu takes the pointer, then again at most twice a second: this runs
@@ -146,7 +146,8 @@ void sync_menu_cursor(bool release) {
         // The present thread cannot release the window thread's game capture.
         request_window_cursor_sync(window);
         logging::write(logging::Level::info, logging::Channel::input,
-            !release && owns_menu_cursor(s) ? "Input ownership: overlay." : "Input ownership: game or desktop.");
+            !release && owns_menu_cursor(s) ? "Input ownership: overlay." :
+                (!release && dingosdk::vr::native_menu_pointer_active() ? "Input ownership: VR pause pointer (legacy mouse enabled)." : "Input ownership: game or desktop."));
     }
 }
 
@@ -154,7 +155,7 @@ BOOL WINAPI clip_cursor(const RECT* rectangle) {
     auto& s = state();
     std::lock_guard lock(s.cursor_mutex);
     const auto native = original<ClipCursorFn>(s.clip_cursor);
-    if (owns_menu_cursor(s)) {
+    if (owns_menu_cursor(s) || dingosdk::vr::native_menu_pointer_active()) {
         // Remember the latest native request for closing the menu; never apply
         // it while either overlay surface owns the pointer.
         if (!s.cursor_released) {
@@ -170,7 +171,7 @@ BOOL WINAPI clip_cursor(const RECT* rectangle) {
 }
 
 BOOL WINAPI set_cursor_pos(int x, int y) {
-    if (block_polled_input()) return TRUE;
+    if (block_polled_input() || (!overlay_input_access && dingosdk::vr::native_menu_pointer_active())) return TRUE;
     return original<SetCursorPosFn>(state().set_cursor_pos)(x, y);
 }
 
@@ -229,7 +230,9 @@ void window_cursor_input(HWND window, UINT message, WPARAM wp, bool overlay_owns
 void update_menu_pointer() {
     auto& s = state();
     auto& io = ImGui::GetIO();
-    const bool active = owns_menu_cursor(s);
+    const auto pointer = dingosdk::vr::menu_pointer();
+    const bool active = owns_menu_cursor(s) || pointer.active;
+    sync_raw_mouse_registration(); // Native VR pause-menu rays also require legacy mouse delivery.
     // The pause menu's server browser watches the pointer while the game keeps it: the same
     // reads, with the game's own cursor on screen and nothing taken from the game.
     const bool watching = !active && s.hub_pointer.load() && s.input_attached && !s.stop && !s.failed &&
@@ -238,7 +241,6 @@ void update_menu_pointer() {
     // A single mouse source owns each frame. Desktop polling used to enqueue a
     // release before every VR press; ImGui's event trickling then broke clicks/drags.
     static bool vr_owned = false;
-    const auto pointer = dingosdk::vr::menu_pointer();
     if (active && pointer.active) {
         dingosdk::overlay::menu_pad_in_charge().store(false);
         io.MouseDrawCursor = true;

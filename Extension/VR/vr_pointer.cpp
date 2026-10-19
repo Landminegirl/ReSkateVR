@@ -10,6 +10,8 @@ struct PointerState {
     MenuPointer latest;
     double updated = -100;
     math::PointerClick click;
+    std::array<float, 4> shortcut{};
+    std::atomic<bool> native_active{false};
     bool context_ready = false, overlay = false, native_down = false;
 };
 PointerState& pointer() { static auto* value = new PointerState; return *value; }
@@ -19,6 +21,12 @@ bool native_button(bool down) {
     event.mi.dwFlags = down ? MOUSEEVENTF_LEFTDOWN : MOUSEEVENTF_LEFTUP;
     return SendInput(1, &event, sizeof(event)) == 1;
 }
+}
+bool native_menu_pointer_active() noexcept { return pointer().native_active.load(std::memory_order_acquire); }
+void set_chat_shortcut_region(float left, float top, float right, float bottom) noexcept {
+    auto& s = pointer();
+    std::lock_guard lock(s.mutex);
+    s.shortcut = {left, top, right, bottom};
 }
 void cancel_menu_pointer() noexcept { detail::release_menu_pointer(); }
 MenuPointer menu_pointer() noexcept {
@@ -32,6 +40,10 @@ void publish_menu_pointer(HWND window, bool active, const std::optional<math::Pa
     std::lock_guard lock(s.mutex);
     const bool foreground = window && GetAncestor(GetForegroundWindow(), GA_ROOT) == GetAncestor(window, GA_ROOT);
     active = active && foreground;
+    s.native_active.store(active && !overlay, std::memory_order_release);
+    const auto& rect = s.shortcut;
+    if (!overlay && active && hit && rect[2] > rect[0] && rect[3] > rect[1] &&
+        hit->u >= rect[0] && hit->u <= rect[2] && hit->v >= rect[1] && hit->v <= rect[3]) overlay = true;
     if (!s.context_ready || s.overlay != overlay) {
         s.click = {};
         s.overlay = overlay;

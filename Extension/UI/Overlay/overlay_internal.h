@@ -128,6 +128,7 @@ struct State {
     std::atomic<bool> console_focus_requested{false};
     // Multiplayer text chat (chat_overlay.cpp): T opens it while in a session.
     std::atomic<bool> chat_visible{false}, chat_available{false};
+    bool vr_chat_open = false; // render-thread-only keyboard chat, over the flat menu panel
     std::atomic<bool> chat_character_pending{false}, chat_escape_pending{false}, chat_focus_requested{false};
     std::atomic<bool> chat_command_requested{false}; // opened with "/": the box starts with it
     // The Multiplayer page drawn in the game's pause menu (hub_page.cpp). hub_pointer: it is

@@ -39,6 +39,19 @@ remain the original projects’ work. The changes below are our additions and re
 - Added optional headset presentation pacing to avoid an extra desktop V-Sync wait
   while OpenXR is pacing the session.
 
+## VR text chat
+
+- Added a **CHAT** shortcut below the flat VR pause/ReSkate menu, enabled while
+  connected to a multiplayer session.
+- Added a headset-friendly live session log, clickable text box, Send and Close
+  controls, and a pop-up keyboard with letters, numbers, Shift, Symbols, Space,
+  Backspace and Clear. Messages use ReSkate's existing text-chat service.
+- Kept the 200-byte message limit, blocked empty messages, and retained the draft
+  if sending cannot be queued. Sending keeps the VR conversation open.
+- Extended native pause-menu ray ownership to enable Windows mouse messages and
+  prevent game cursor clipping/recentering while the ray is active. This targets
+  the startup refocus workaround; hardware confirmation is pending.
+
 ## HUD and menus
 
 - Added game-HUD controls to the VR menu.

@@ -899,7 +899,7 @@ void render(IDXGISwapChain* presented, UINT flags) {
     sync_menu_cursor();
     // (Watching the pointer for the pause menu's browser keeps the mouse state between frames,
     // or every frame would look like a fresh click.)
-    if (!interactive) { ImGui::GetIO().ClearInputKeys(); if (!hub_frame) ImGui::GetIO().ClearInputMouse(); }
+    if (!interactive) { ImGui::GetIO().ClearInputKeys(); if (!hub_frame && !dingosdk::vr::menu_pointer().active) ImGui::GetIO().ClearInputMouse(); }
     feed_menu_gamepad(interactive && s.visible.load() && !s.editor_visible.load());
     ImGui::GetIO().MouseDrawCursor = owns_menu_cursor(s);
     ImGui_ImplDX12_NewFrame();

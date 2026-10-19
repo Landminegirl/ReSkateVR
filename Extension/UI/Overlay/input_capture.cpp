@@ -637,7 +637,7 @@ int WINAPI captured_show_cursor(BOOL show) {
     return original<int(WINAPI*)(BOOL)>(input_hooks().show_cursor)(show);
 }
 BOOL WINAPI captured_physical_cursor(int x, int y) {
-    if (block_polled_input()) return TRUE;
+    if (block_polled_input() || (!overlay_input_access && vr::native_menu_pointer_active())) return TRUE;
     return original<BOOL(WINAPI*)(int, int)>(input_hooks().physical_cursor)(x, y);
 }
 BOOL WINAPI captured_cursor_position(LPPOINT output) {
@@ -913,7 +913,7 @@ void sync_raw_mouse_registration(bool overlay_owns_pointer) {
     try {
         auto& mouse = raw_mouse();
         std::lock_guard lock(mouse.mutex);
-        const bool overlay = overlay_owns_pointer;
+        const bool overlay = overlay_owns_pointer || vr::native_menu_pointer_active();
         if (overlay == mouse.overridden) return;
         mouse.overridden = overlay;
         // Only a registration that actually blocks the cursor needs replacing.

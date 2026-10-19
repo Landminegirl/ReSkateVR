@@ -35,8 +35,8 @@ jobs:
           Copy-Item tools/quest2/PLAY.txt dist/READ_ME_FIRST.txt
           Copy-Item tools/quest2/CHANGES_FROM_ORIGINAL.md dist/CHANGES_FROM_ORIGINAL.md
           $sourceCommit = git rev-parse HEAD
-          "OpenXR startup input / framing v10`nSource commit: $sourceCommit`nBuilt and tested by GitHub Actions. Physical headset validation pending." | Set-Content dist/BUILD.txt
-          git archive --format=zip --output=ReSkateVR-OpenXR-v10-source.zip HEAD
+          "OpenXR chat / pause pointer v11`nSource commit: $sourceCommit`nBuilt and tested by GitHub Actions. Physical headset validation pending." | Set-Content dist/BUILD.txt
+          git archive --format=zip --output=ReSkateVR-OpenXR-v11-source.zip HEAD
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Copy-Item External/openxr/LICENSE dist/LICENSE-OpenXR.txt
           python tools/quest2/fetch_openxr_loader.py
@@ -56,6 +56,6 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ReSkateVR-OpenXR-v10-source
-          path: ReSkateVR-OpenXR-v10-source.zip
+          name: ReSkateVR-OpenXR-v11-source
+          path: ReSkateVR-OpenXR-v11-source.zip
           if-no-files-found: error
