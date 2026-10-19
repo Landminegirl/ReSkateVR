@@ -12,6 +12,9 @@ remain the original projects’ work. The changes below are our additions and re
 
 - Added separate **PLAY** and **LAUNCH VR** buttons, so the same installation can
   start in desktop mode or VR without editing files.
+
+  <img width="1447" height="752" alt="reskatemainscreen" src="https://github.com/user-attachments/assets/b6506b27-7c15-45a2-a2a5-5cf87b218b8f" />
+
 - Packaged a drag-and-drop Windows download with the launcher, VR runtime and
   OpenXR loader. Players do not need PowerShell, Python or a compiler.
 - Added a dedicated launcher **VR settings** page with a saved square-resolution
