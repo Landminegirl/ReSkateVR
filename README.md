@@ -1,5 +1,3 @@
-# Changes from original Reskatevr to this version
-
 # ReSkateVR — OpenXR update: changes from the original VR build
 
 Built on **cesarcc2’s ReSkateVR** and the work of the **ReSkate contributors**.
