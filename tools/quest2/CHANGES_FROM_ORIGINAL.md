@@ -41,16 +41,21 @@ remain the original projects’ work. The changes below are our additions and re
 
 ## VR text chat
 
-- Added a **CHAT** shortcut below the flat VR pause/ReSkate menu, enabled while
+- Added a large, resolution-scaled **CHAT** shortcut below the flat VR pause/ReSkate menu, enabled while
   connected to a multiplayer session.
 - Added a headset-friendly live session log, clickable text box, Send and Close
   controls, and a pop-up keyboard with letters, numbers, Shift, Symbols, Space,
   Backspace and Clear. Messages use ReSkate's existing text-chat service.
+- Fixed chat session availability so the pause menu does not disable explicit
+  VR chat or immediately close its panel; passive-chat visibility stays separate.
 - Kept the 200-byte message limit, blocked empty messages, and retained the draft
   if sending cannot be queued. Sending keeps the VR conversation open.
 - Extended native pause-menu ray ownership to enable Windows mouse messages and
   prevent game cursor clipping/recentering while the ray is active. This targets
   the startup refocus workaround; hardware confirmation is pending.
+- Extended the guard to mouse capture, and added a one-time activation handoff
+  on the game's window thread while it is already foreground. This avoids
+  deliberately switching away/back or taking focus from another application.
 
 ## HUD and menus
 

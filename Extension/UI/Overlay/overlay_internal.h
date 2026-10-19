@@ -1,5 +1,6 @@
 #pragma once
 #include "overlay.h"
+#include "Extension/VR/vr_activation.h"
 #include "Engine/Core/Console/command_registry.h"
 #include "Extension/Skater/free_flight.h"
 #include "gpu_diagnostics.h"
@@ -145,6 +146,7 @@ struct State {
     std::atomic<bool> input_attached{false};
     std::atomic<bool> stop{false};
     std::atomic<HWND> window{nullptr};
+    dingosdk::vr::MenuActivation vr_menu_activation;
     struct WindowHook { WNDPROC previous{}; bool installed{}; };
     std::recursive_mutex window_hook_mutex;
     std::map<HWND, WindowHook> window_hooks;

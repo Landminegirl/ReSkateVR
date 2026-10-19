@@ -1,4 +1,5 @@
 #include "session_internal.h"
+#include "Engine/Game/Multiplayer/chat_access.h"
 #include "Engine/Game/World/world_names.h"
 #include "Extension/Multiplayer/Hud/native_player_ui.h"
 #include "Extension/Multiplayer/Remote/native_audio.h"
@@ -623,7 +624,9 @@ void publish_chat(Session &s) {
     view.maps.erase(std::unique(view.maps.begin(), view.maps.end()), view.maps.end());
     // Hidden chat is not offered at all: no lines on screen and T does nothing. A game menu
     // (or the game's hidden UI) also closes an open chat box.
-    view.available = (s.mode == Mode::host || s.mode == Mode::join) && s.chat_visible && !s.game_menu;
+    const auto access = chat_access(s.mode == Mode::host || s.mode == Mode::join, s.chat_visible, s.game_menu);
+    view.available = access.passive;
+    view.session_available = access.session;
     view.latest = s.chat.empty() ? 0 : s.chat.back().sequence;
     if (dedicated && s.vote.id) {
         auto &vote = view.vote;

@@ -1,4 +1,4 @@
-RESKATE VR - OPENXR CONTROLS / STARTUP INPUT / VR CHAT / PAUSE POINTER v11 (EXPERIMENTAL)
+RESKATE VR - OPENXR CONTROLS / STARTUP INPUT / VR CHAT / PAUSE POINTER v12 (EXPERIMENTAL)
 
 INSTALL
 1. Close skate. and ReSkateLauncher. Back up the files from your current build.
@@ -10,7 +10,20 @@ INSTALL
 
 No PowerShell, Python, compiler or scripts are needed to play.
 
-WHAT CHANGED IN v11
+WHAT CHANGED IN v12
+- CHAT is larger and scales with render resolution. A connected session keeps
+  explicit VR chat available while paused; passive chat hiding no longer
+  disables the button or closes its text panel. Offline shows a join message.
+- Native pause pointer ownership now also releases the game's mouse capture
+  and prevents it from recapturing while the VR ray is active.
+- On the first active VR menu, a one-time message refreshes input activation on
+  the game's own window thread. It runs only if the game is already foreground;
+  it never switches away/back or takes focus from another desktop application.
+- Automated ImGui checks click the actual large button in a connected pause
+  menu, verify offline disabling, and check size scaling. Headset confirmation
+  of the startup input workaround is still needed.
+
+RETAINED v11 FEATURES
 - In a multiplayer session, use CHAT below the VR pause/ReSkate menu to open
   the live log, text box and Send button. Click the box for a pop-up keyboard.
   Point the right controller and click keys. Shift, Symbols, Space, Backspace

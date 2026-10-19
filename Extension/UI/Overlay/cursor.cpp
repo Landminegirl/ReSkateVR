@@ -108,6 +108,38 @@ UINT cursor_sync_message() {
     return message;
 }
 
+UINT vr_input_ready_message() {
+    static const auto message = RegisterWindowMessageW(L"ReSkate.VR.MenuInputReady.v12");
+    return message;
+}
+void initialize_vr_menu_input(HWND window, WNDPROC previous) {
+    auto& s = state();
+    const auto key = reinterpret_cast<std::uintptr_t>(window);
+    const auto root = window ? GetAncestor(window, GA_ROOT) : nullptr;
+    const bool foreground = root && GetForegroundWindow() == root && !IsIconic(root);
+    if (!previous || window != s.window.load() || s.stop || !dingosdk::vr::settings().enabled) {
+        s.vr_menu_activation.cancel(key);
+        return;
+    }
+    if (!s.vr_menu_activation.deliver(key, foreground)) return;
+    // The input hooks may attach after the original activation, before the game's
+    // input devices are ready. Reassert the TRUE state once on its window thread.
+    // Never deactivate the game, switch desktop windows or claim foreground.
+    const auto capture = GetCapture();
+    if (capture && (capture == window || IsChild(window, capture))) {
+        OverlayInputAccess access;
+        ReleaseCapture();
+    }
+    if (GetActiveWindow() != root) SetActiveWindow(root);
+    const auto focus = GetFocus();
+    if (focus != window && !IsChild(window, focus)) SetFocus(window);
+    CallWindowProcW(previous, window, WM_ACTIVATEAPP, TRUE, 0);
+    CallWindowProcW(previous, window, WM_ACTIVATE, WA_ACTIVE, 0);
+    if (GetFocus() == window) CallWindowProcW(previous, window, WM_SETFOCUS, 0, 0);
+    logging::printf(logging::Level::info, logging::Channel::input,
+        "VR native menu input initialized once on the active window thread (capture=%p, focus=%p).", capture, GetFocus());
+}
+
 void request_window_cursor_sync(HWND window) {
     const auto message = cursor_sync_message();
     if (window && message) PostMessageW(window, message, 0, 0);
@@ -188,6 +220,12 @@ void window_cursor_input(HWND window, UINT message, WPARAM wp, bool overlay_owns
     // handoff after initial setup, a close button, or swapchain recreation.
     thread_local HWND owner{};
     thread_local unsigned buttons{};
+    const bool native_ray = message != WM_NCDESTROY && window == s.window.load() && dingosdk::vr::native_menu_pointer_active();
+    if (native_ray) {
+        OverlayInputAccess access;
+        const auto capture = GetCapture();
+        if (capture && (capture == window || IsChild(window, capture))) ReleaseCapture();
+    }
     const bool active = message != WM_NCDESTROY && window == s.window.load() && overlay_owns_pointer;
     if (!active) {
         if (owner == window) {
@@ -232,6 +270,12 @@ void update_menu_pointer() {
     auto& io = ImGui::GetIO();
     const auto pointer = dingosdk::vr::menu_pointer();
     const bool active = owns_menu_cursor(s) || pointer.active;
+    if (pointer.active || dingosdk::vr::native_menu_pointer_active()) {
+        const auto window = s.window.load();
+        const auto key = reinterpret_cast<std::uintptr_t>(window);
+        if (s.vr_menu_activation.request(key, game_window_foreground(window)) &&
+            !PostMessageW(window, vr_input_ready_message(), 0, 0)) s.vr_menu_activation.cancel(key);
+    }
     sync_raw_mouse_registration(); // Native VR pause-menu rays also require legacy mouse delivery.
     // The pause menu's server browser watches the pointer while the game keeps it: the same
     // reads, with the game's own cursor on screen and nothing taken from the game.

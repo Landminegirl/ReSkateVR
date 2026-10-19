@@ -257,3 +257,24 @@ clip/recenter guards beyond overlay-only menus. Existing foreground/window/monit
 target checks and release-before-arm behavior remain. Hardware confirmation of
 the initial refocus workaround is pending.
 
+
+## v12: menu chat access and native capture initialization
+
+The original MultiplayerChat.available flag hides passive chat and T input while
+s.game_menu is true. v11 incorrectly used it for the explicit VR chat button,
+which disabled/closed chat while paused. A separate session_available flag now
+reports the transport session independently of passive visibility. The legacy
+available semantics remain for desktop/passive chat. Chat targets scale from
+270x66 to 720x176 pixels (360x88 at 1080 high); offline has a visible explanation.
+
+Native pointer ownership now covers SetCapture and releases game-owned capture
+on its window thread. A posted, foreground-checked one-time activation handoff
+reasserts the current active state after the VR pointer is ready. It does not
+post deactivation, use SetForegroundWindow, or switch desktop windows. Failed
+posts/lost foreground are retryable; completed handoffs are not looped. The log
+records delivery. Physical headset confirmation remains necessary.
+
+vr_chat_ui tests run actual ImGui button press/release while the session is
+connected and paused, including offline disabling and scaled sizes. Native math
+checks cover activation-post deduplication, foreground loss, cancellation and
+stale HWND requests, in addition to the existing VR/input/text checks.

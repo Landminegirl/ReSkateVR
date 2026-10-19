@@ -11,6 +11,8 @@ bool game_window_foreground(HWND window);
 bool sampled_keys(HWND window, std::array<std::uint64_t, 4>& held);
 void sync_menu_cursor(bool release = false);
 UINT cursor_sync_message();
+UINT vr_input_ready_message();
+void initialize_vr_menu_input(HWND window, WNDPROC previous);
 void request_window_cursor_sync(HWND window);
 void window_cursor_input(HWND window, UINT message, WPARAM wp);
 // The same, when the caller already knows whether the overlay owns the pointer

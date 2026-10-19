@@ -1,5 +1,7 @@
 #include "overlay_internal.h"
+#include "Engine/Core/Log/logging.h"
 #include "chat_emotes.h"
+#include "vr_chat_widgets.h"
 #include "chat_rich.h"
 #include "nametag_gradient.h"
 #include "role_badge.h"
@@ -340,7 +342,7 @@ bool chat_pending() {
         }
         s.chat_available.store(c.feed.available);
         // Leaving the session closes an open chat box.
-        if (!c.feed.available) s.chat_visible.store(false);
+        if (!(s.vr_chat_open ? c.feed.session_available : c.feed.available)) s.chat_visible.store(false);
         for (const auto& line : c.feed.lines)
             if (line.sequence > c.seen) {
                 c.arrivals.emplace_back(line.sequence, now);
@@ -354,7 +356,7 @@ bool chat_pending() {
         c.keyboard = false;
     }
     dingosdk::vr::set_chat_keyboard_open(s.vr_chat_open);
-    note_typing(c, s.chat_visible.load() && c.feed.available);
+    note_typing(c, s.chat_visible.load() && (s.vr_chat_open ? c.feed.session_available : c.feed.available));
     // Keep the chat shortcut visible below native pause and ReSkate menus even with an empty log.
     if (dingosdk::vr::settings().enabled && dingosdk::vr::game_menu_open()) return true;
     if (s.chat_visible.load()) return true;
@@ -757,8 +759,9 @@ void vr_chat_shortcut(State& s, ChatState& c, ImVec2 display) {
     constexpr auto flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
         ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoMove;
     ImGui::Begin("##vr_chat_shortcut", nullptr, flags);
-    ImGui::BeginDisabled(!c.feed.available);
-    if (ImGui::Button("CHAT", ImVec2(160, 38))) {
+    ImGui::SetWindowFontScale(std::clamp(display.y / 1080.0f, 0.75f, 2.0f));
+    const auto shortcut = vr_chat_button(c.feed.session_available, display);
+    if (shortcut.clicked) {
         s.vr_chat_open = true;
         s.chat_visible.store(true);
         s.chat_focus_requested.store(true);
@@ -766,11 +769,9 @@ void vr_chat_shortcut(State& s, ChatState& c, ImVec2 display) {
         c.scroll_to_bottom = true;
         c.send_status.clear();
         dingosdk::vr::set_chat_keyboard_open(true);
+        dingosdk::logging::write(dingosdk::logging::Level::info, dingosdk::logging::Channel::input, "VR session chat opened from menu.");
     }
-    ImGui::EndDisabled();
-    if (!c.feed.available && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-        ImGui::SetTooltip("Join a multiplayer session to chat.");
-    const auto lo = ImGui::GetItemRectMin(), hi = ImGui::GetItemRectMax();
+    const auto lo = shortcut.low, hi = shortcut.high;
     if (display.x > 0 && display.y > 0)
         dingosdk::vr::set_chat_shortcut_region(lo.x / display.x, lo.y / display.y, hi.x / display.x, hi.y / display.y);
     ImGui::End();
@@ -832,7 +833,7 @@ void draw_chat() {
     auto& s = state();
     auto& c = chat();
     vr_chat_shortcut(s, c, ImGui::GetIO().DisplaySize);
-    if (!c.feed.available) return;
+    if (!(s.vr_chat_open ? c.feed.session_available : c.feed.available)) return;
     auto* heading = s.menu.bold ? s.menu.bold : ImGui::GetFont();
     auto* body = s.menu.body ? s.menu.body : ImGui::GetFont();
     const auto display = ImGui::GetIO().DisplaySize;

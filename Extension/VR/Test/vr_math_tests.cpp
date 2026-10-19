@@ -4,6 +4,8 @@
 #include "Extension/VR/vr_math.h"
 #include "Extension/VR/vr.h"
 #include <cstdio>
+#include "Engine/Game/Multiplayer/chat_access.h"
+#include "Extension/VR/vr_activation.h"
 #include "Extension/VR/vr_chat_text.h"
 #ifdef _WIN32
 #include "Extension/VR/vr_xinput.h"
@@ -46,6 +48,28 @@ Quat pitch(float radians) { return {std::sin(radians / 2), 0, 0, std::cos(radian
 }
 
 int main() {
+    {
+        dingosdk::vr::MenuActivation activation;
+        CHECK(!activation.request(1, false));
+        CHECK(activation.request(1, true));
+        CHECK(!activation.request(1, true)); // no repeated posts while pending
+        CHECK(!activation.deliver(1, false)); // foreground lost before the posted message runs
+        CHECK(activation.request(1, true));
+        CHECK(activation.deliver(1, true));
+        CHECK(!activation.request(1, true)); // exactly once for this HWND
+        activation.destroyed(1);
+        CHECK(activation.request(1, true));
+        activation.cancel(1); // failed PostMessage can retry
+        CHECK(activation.request(1, true));
+        CHECK(activation.request(2, true));
+        CHECK(!activation.deliver(1, true)); // an old HWND cannot consume the new request
+        CHECK(activation.deliver(2, true));
+        const auto paused = dingosdk::chat_access(true, true, true);
+        CHECK(paused.session && !paused.passive);
+        const auto hidden = dingosdk::chat_access(true, false, false);
+        CHECK(hidden.session && !hidden.passive);
+        CHECK(!dingosdk::chat_access(false, true, false).session);
+    }
     {
         using namespace dingosdk::vr::chat_text;
         char text[6]{};

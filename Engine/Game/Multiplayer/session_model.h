@@ -151,7 +151,8 @@ struct MultiplayerAnnouncement {
     unsigned seconds{}; // how long it still shows
 };
 struct MultiplayerChat {
-    bool available{};           // in a session that can carry chat
+    bool available{};           // passive chat/T shortcut offered outside native menus
+    bool session_available{};   // explicit chat panel can send while a native menu is open
     std::uint64_t latest{};     // sequence of the newest line, 0 when empty
     std::vector<MultiplayerChatLine> lines;
     std::vector<MultiplayerChatCommand> commands; // what "/" offers in this session

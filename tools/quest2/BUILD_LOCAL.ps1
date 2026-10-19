@@ -21,9 +21,9 @@ foreach ($node in $xml.SelectNodes('//msb:ClCompile[@Include]', $ns)) {
     }
 }
 $xml.Save($project)
-cmake --build $build --config Release --parallel 4 --target dingosdk_runtime dingosdk_launcher dingosdk_vr_math_tests dingosdk_vr_launch_tests
+cmake --build $build --config Release --parallel 4 --target dingosdk_runtime dingosdk_launcher dingosdk_vr_math_tests dingosdk_vr_launch_tests dingosdk_vr_chat_ui_tests
 if ($LASTEXITCODE -ne 0) { throw 'Build failed' }
-ctest --test-dir $build -C Release -R "vr_(math|launch)" --output-on-failure
+ctest --test-dir $build -C Release -R "vr_(math|launch|chat_ui)" --output-on-failure
 if ($LASTEXITCODE -ne 0) { throw 'Native math checks failed' }
 python "$PSScriptRoot/check_shader.py"
 if ($LASTEXITCODE -ne 0) { throw 'Shader checks failed' }

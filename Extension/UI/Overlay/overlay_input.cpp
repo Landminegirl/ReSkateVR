@@ -113,6 +113,11 @@ LRESULT CALLBACK window_proc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
     const bool pointer_owned = pointer_message && owns_menu_cursor(s);
     const auto owns_pointer = [&] { return pointer_message ? pointer_owned : owns_menu_cursor(s); };
     if (window == s.window.load()) sync_raw_mouse_registration(owns_pointer());
+    if (message && message == vr_input_ready_message()) {
+        initialize_vr_menu_input(window, previous);
+        return 0;
+    }
+    if (message == WM_NCDESTROY) s.vr_menu_activation.destroyed(reinterpret_cast<std::uintptr_t>(window));
     if (message && message == cursor_sync_message()) {
         window_cursor_input(window, message, wp);
         return 0;

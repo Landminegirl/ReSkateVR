@@ -23,9 +23,9 @@ jobs:
       - name: Configure
         run: cmake --preset vs2022-x64 -DDINGOSDK_CARGO=OFF -DDINGOSDK_BUILD_VR_TESTS=ON -DDINGOSDK_LAUNCHER_AUTO_UPDATE=OFF
       - name: Build
-        run: cmake --build --preset release --parallel 4 --target dingosdk_runtime dingosdk_launcher dingosdk_vr_math_tests dingosdk_vr_launch_tests
+        run: cmake --build --preset release --parallel 4 --target dingosdk_runtime dingosdk_launcher dingosdk_vr_math_tests dingosdk_vr_launch_tests dingosdk_vr_chat_ui_tests
       - name: Check native VR math
-        run: ctest --test-dir build/vs2022-x64 -C Release -R "vr_(math|launch)" --output-on-failure
+        run: ctest --test-dir build/vs2022-x64 -C Release -R "vr_(math|launch|chat_ui)" --output-on-failure
       - name: Stage test binaries
         shell: pwsh
         run: |
@@ -35,8 +35,8 @@ jobs:
           Copy-Item tools/quest2/PLAY.txt dist/READ_ME_FIRST.txt
           Copy-Item tools/quest2/CHANGES_FROM_ORIGINAL.md dist/CHANGES_FROM_ORIGINAL.md
           $sourceCommit = git rev-parse HEAD
-          "OpenXR chat / pause pointer v11`nSource commit: $sourceCommit`nBuilt and tested by GitHub Actions. Physical headset validation pending." | Set-Content dist/BUILD.txt
-          git archive --format=zip --output=ReSkateVR-OpenXR-v11-source.zip HEAD
+          "OpenXR chat / pause pointer v12`nSource commit: $sourceCommit`nBuilt and tested by GitHub Actions. Physical headset validation pending." | Set-Content dist/BUILD.txt
+          git archive --format=zip --output=ReSkateVR-OpenXR-v12-source.zip HEAD
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Copy-Item External/openxr/LICENSE dist/LICENSE-OpenXR.txt
           python tools/quest2/fetch_openxr_loader.py
@@ -56,6 +56,6 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ReSkateVR-OpenXR-v11-source
-          path: ReSkateVR-OpenXR-v11-source.zip
+          name: ReSkateVR-OpenXR-v12-source
+          path: ReSkateVR-OpenXR-v12-source.zip
           if-no-files-found: error

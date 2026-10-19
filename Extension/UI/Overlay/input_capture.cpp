@@ -618,7 +618,7 @@ void apply_raw_mouse(RawMouse& mouse, bool overlay) {
         applied ? 0ul : GetLastError());
 }
 HWND WINAPI captured_capture(HWND window) {
-    if (block_polled_input() || (overlay_input_access &&
+    if (block_polled_input() || (!overlay_input_access && vr::native_menu_pointer_active()) || (overlay_input_access &&
         GetWindowThreadProcessId(window, nullptr) != GetCurrentThreadId())) return GetCapture();
     return original<HWND(WINAPI*)(HWND)>(input_hooks().capture)(window);
 }
