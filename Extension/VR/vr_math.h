@@ -35,7 +35,7 @@ struct StickViewSwitch {
 };
 // Insets compose with the game's existing safe area; 100% is exactly unchanged.
 inline std::array<float, 4> hud_margins(const std::array<float, 4>& native, float area) {
-    area = std::clamp(area, 0.5f, 1.0f);
+    area = std::clamp(area, 0.1f, 1.0f);
     if (area == 1.0f) return native;
     auto result = native;
     for (auto& edge : result) edge = 0.5f - (0.5f - edge) * area;
@@ -263,6 +263,20 @@ inline Matrix compose(const Matrix& base, float base_heading, bool level, const 
     first_person::write(result, first_person::normalized(first_person::multiply(turn, relative)),
         {base[12] + moved[0], base[13] + moved[1], base[14] + moved[2]});
     return result;
+}
+
+// Convert the renderer's actual world orientation through the same rig-to-tracking
+// transform as the issued camera. This includes engine interpolation of HMD motion.
+inline Quat rendered_tracking_orientation(const Matrix& issued_world, const Quat& issued_tracking, const Matrix& rendered_world) {
+    return first_person::normalized(first_person::multiply(issued_tracking,
+        first_person::multiply(first_person::conjugate(first_person::orientation(issued_world)),
+            first_person::orientation(rendered_world))));
+}
+using RotationBasis = std::array<Vec3, 3>;
+inline RotationBasis late_rotation_basis(const Quat& source, const Quat& target) {
+    const auto rotation = first_person::normalized(first_person::multiply(first_person::conjugate(source), target));
+    return {first_person::rotate(rotation, {1, 0, 0}), first_person::rotate(rotation, {0, 1, 0}),
+        first_person::rotate(rotation, {0, 0, 1})};
 }
 
 // Field-of-view tangents: left and down are negative.

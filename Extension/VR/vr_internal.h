@@ -66,6 +66,10 @@ struct EyeRecord {
     // Side-by-side input: one image holds both eyes, rendered from between them.
     bool both = false;
     math::Pose left, right;
+    math::Matrix world{};
+    float world_scale = 1;
+    double sampled = 0;
+    std::uint64_t generation = 0;
 };
 
 struct Shared {
@@ -90,6 +94,11 @@ struct Shared {
     // Camera frames waiting for their image; newest last.
     std::mutex records_mutex;
     std::deque<EyeRecord> records;
+    std::deque<EyeRecord> issued; // every camera writer, including ticks
+    std::optional<EyeRecord> rendered;
+    std::uint64_t render_sequence = 0;
+    std::atomic<bool> render_pose_available{false};
+    std::atomic<std::uint64_t> rendered_frames{0};
     std::uint64_t next_sequence = 1;
 
     std::atomic<double> camera_time{-100.0};      // last VR camera write

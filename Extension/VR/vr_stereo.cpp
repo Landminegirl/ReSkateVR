@@ -18,6 +18,8 @@ SamplerState linear_clamp : register(s0);
 cbuffer Constants : register(b0) {
     uint mode; float side; float scale; float max_shift; float vignette;
     float u_scale; float v_scale; float u_bias; float v_bias; uint search_steps;
+    float source_horizontal; float source_vertical;
+    float4 rotation_x; float4 rotation_y; float4 rotation_z;
 };
 struct Vertex { float4 position : SV_Position; float2 uv : TEXCOORD0; };
 Vertex vs_main(uint id : SV_VertexID) {
@@ -72,6 +74,16 @@ float4 ps_main(Vertex v) : SV_Target {
     // The OpenXR eye frustum can be asymmetric (not centred at 0).
     // Preserve actual headset rays before the depth-based parallax shift.
     float2 scene_uv = v.uv * float2(u_scale, v_scale) + float2(u_bias, v_bias);
+    // Late rotational reprojection: target-eye rays expressed in the source camera.
+    // The compositor receives the target orientation only after these pixels are warped.
+    float3 ray = float3((scene_uv.x - 0.5) * 2 * source_horizontal,
+        (0.5 - scene_uv.y) * 2 * source_vertical, -1);
+    ray = ray.x * rotation_x.xyz + ray.y * rotation_y.xyz + ray.z * rotation_z.xyz;
+    if (ray.z >= -0.0001) return float4(0, 0, 0, 1);
+    scene_uv = float2(0.5 + ray.x / (-2 * ray.z * source_horizontal),
+        0.5 - ray.y / (-2 * ray.z * source_vertical));
+    // A fast turn can expose rays the original frame never rendered. Avoid edge smearing.
+    if (any(scene_uv < 0) || any(scene_uv > 1)) return float4(0, 0, 0, 1);
     float x = scene_uv.x;
     uint decode = mode & 0xff;
     bool background_fill = (mode & 0x100) != 0;
@@ -147,7 +159,7 @@ bool DepthStereo::create(ID3D12Device* device, std::string& error) {
     parameters[0].DescriptorTable = {1, &range};
     parameters[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
     parameters[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
-    parameters[1].Constants = {0, 0, 10};
+    parameters[1].Constants = {0, 0, 24};
     parameters[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
     D3D12_STATIC_SAMPLER_DESC sampler{};
     sampler.Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
@@ -421,7 +433,11 @@ bool DepthStereo::render(ID3D12CommandQueue* queue, const std::array<ID3D12Resou
         device_->CreateRenderTargetView(targets[eye], &target_view, rtv);
         // Left eye (+1): near points move right in its image; right eye (-1): left.
         const float side = eye == 0 ? 1.0f : -1.0f;
-        std::array<UINT, 10> constants{mode, 0, 0, 0, 0, 0, 0, 0, 0, std::clamp(params.steps, 12u, 48u)};
+        std::array<UINT, 24> constants{mode, 0, 0, 0, 0, 0, 0, 0, 0, std::clamp(params.steps, 12u, 48u)};
+        std::memcpy(&constants[10], &params.source_horizontal, sizeof(float));
+        std::memcpy(&constants[11], &params.source_vertical, sizeof(float));
+        for (std::size_t axis = 0; axis < 3; ++axis)
+            std::memcpy(&constants[12 + axis * 4], params.rotation[eye][axis].data(), sizeof(float) * 3);
         std::memcpy(&constants[1], &side, sizeof(float));
         std::memcpy(&constants[2], &params.scale, sizeof(float));
         std::memcpy(&constants[3], &params.max_shift, sizeof(float));

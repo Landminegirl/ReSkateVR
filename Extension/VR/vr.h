@@ -94,7 +94,8 @@ struct Settings {
     int view_mode = 0;
     bool stick_view_switch = true;
     // Native safe-area layout: smaller moves HUD anchors inwards, preserving text size.
-    float hud_area = 1.0f;
+    float hud_area = 0.5f;
+    bool late_rotation = true;
     // Eye reconstruction resolution and ray search quality, independent of scene FOV.
     float eye_render_scale = 0.75f;
     int stereo_steps = 24;
@@ -281,6 +282,9 @@ bool apply_camera(std::array<float, 16>& matrix, CameraWriter writer, const Body
 void start_depth_probe() noexcept;
 void start_hud_layout(std::uintptr_t base) noexcept;
 bool hud_layout_available() noexcept;
+// Native rendered-view observer; shares the existing guarded renderer hook.
+void observe_render_view(std::uintptr_t view) noexcept;
+void set_render_pose_available(bool available) noexcept;
 // Present thread: picks the scene depth for this image size.
 void depth_on_present(std::uint64_t width, std::uint32_t height) noexcept;
 // Copies the scene depth (previous frame) at each of its clears while enabled.

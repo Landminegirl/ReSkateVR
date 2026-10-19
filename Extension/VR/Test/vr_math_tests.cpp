@@ -43,6 +43,43 @@ Quat pitch(float radians) { return {std::sin(radians / 2), 0, 0, std::cos(radian
 
 int main() {
     {
+        CHECK(near(dingosdk::vr::Settings{}.hud_area, .5f));
+        const std::array<float, 4> native{};
+        const auto smaller = hud_margins(native, .1f);
+        const auto half = hud_margins(native, .5f);
+        CHECK(near(smaller[0], .45f) && near(half[0], .25f));
+        // A player's 80-degree rig rotation must not leak into the tracking pose.
+        Matrix issued{}, rendered{};
+        const auto rig = yaw(80 * pi / 180);
+        const auto old_head = yaw(20 * pi / 180), new_head = yaw(25 * pi / 180);
+        first_person::write(issued, first_person::multiply(rig, old_head), {3, 2, 1});
+        first_person::write(rendered, first_person::multiply(rig, new_head), {3, 2, 1});
+        const auto recovered = rendered_tracking_orientation(issued, old_head, rendered);
+        CHECK(near(first_person::rotate(recovered, {0,0,-1}), first_person::rotate(new_head, {0,0,-1})));
+        // Simulate 50 Hz source images and 90 Hz head tracking. For a fixed world
+        // landmark the late rotation must map each target ray into the source ray,
+        // including pitch and roll. No smoothing delay or orientation retagging.
+        const Vec3 landmark{.2f, .3f, -2};
+        for (int frame = 0; frame < 180; ++frame) {
+            const float time = frame / 90.0f;
+            const float source_time = std::floor(time * 50) / 50;
+            const auto pose = [&](float t) {
+                const auto pitch = first_person::Quat{std::sin(t*.11f),0,0,std::cos(t*.11f)};
+                const auto roll = first_person::Quat{0,0,std::sin(t*.07f),std::cos(t*.07f)};
+                return first_person::multiply(yaw(t*.4f), first_person::multiply(pitch, roll));
+            };
+            const auto source = pose(source_time), target = pose(time + .04f);
+            const auto target_ray = first_person::rotate(first_person::conjugate(target), landmark);
+            const auto basis = late_rotation_basis(source, target);
+            Vec3 warped{};
+            for (unsigned axis = 0; axis < 3; ++axis)
+                for (unsigned component = 0; component < 3; ++component)
+                    warped[component] += basis[axis][component] * target_ray[axis];
+            CHECK(near(warped, first_person::rotate(first_person::conjugate(source), landmark)));
+        }
+    }
+
+    {
         StickViewSwitch click;
         CHECK(!click.sample(true, false, false));
         CHECK(!click.sample(true, true, false));

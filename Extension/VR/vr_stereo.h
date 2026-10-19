@@ -19,6 +19,11 @@ struct StereoParams {
     bool background_fill = true;
     float vignette = 0; // comfort vignette (0 none)
     unsigned steps = 24;
+    float source_horizontal = 1, source_vertical = 1;
+    // Columns of target-eye-to-source-camera rotation, one basis per eye.
+    using Rotation = std::array<std::array<float, 3>, 3>;
+    static constexpr Rotation identity{{{1,0,0}, {0,1,0}, {0,0,1}}};
+    std::array<Rotation, 2> rotation{identity, identity};
     // Map each output eye UV into the symmetric centre-camera image.
     // Identity means the old symmetric projection (used for debugging).
     std::array<float, 2> u_scale{1.0f, 1.0f}, v_scale{1.0f, 1.0f};

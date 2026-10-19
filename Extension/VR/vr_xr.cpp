@@ -64,7 +64,9 @@ struct Runtime {
     std::string last_error;
     // Camera frames collected per present, newest last; the image presented
     // now belongs to the entry `frame_lag` presents back.
-    std::uint64_t collected = 0;
+    std::uint64_t collected = 0, render_collected = 0;
+    bool renderer_pairing = false;
+    std::uint64_t native_pairs = 0, legacy_pairs = 0;
     std::deque<std::optional<EyeRecord>> history;
     math::Anchor screen_anchor;
     std::uint64_t screen_recenter = 0;
@@ -259,6 +261,10 @@ void teardown(const std::string& reason, double retry) {
     {
         std::lock_guard lock(s.records_mutex);
         s.records.clear();
+        s.issued.clear();
+        s.rendered.reset();
+        r.renderer_pairing = false;
+        r.render_collected = 0;
     }
     if (!reason.empty()) log_info(reason);
     update_status([&](Status& st) {
@@ -572,12 +578,14 @@ void publish_rates(double now) {
         }
         log_info(std::format("stats: state {}, headset {:.0f} Hz, presents {:.1f}/s, camera frames {:.1f}/s, "
             "pairing none/one/more {}/{}/{}, eye images {}, repeats {}, frames {}, {}, image {}x{} format {}, render FOV {:.1f}, "
-            "frame lag {}, camera thread {}, present thread {}, eye reconstruction {}x{} / {} samples",
+            "frame lag {}, camera thread {}, present thread {}, eye reconstruction {}x{} / {} samples, pose pairing {}, native/legacy {}/{}, render observations {}, late rotation {}",
             snapshot.state, period > 0 ? 1e9 / static_cast<double>(period) : 0.0, present_hz, camera_hz,
             r.pairing[0], r.pairing[1], r.pairing[2], snapshot.eye_images, snapshot.repeated_images, snapshot.frames_submitted,
             camera_active(now) ? "VR camera" : snapshot.theater_active ? "flat screen" : "idle",
             snapshot.image_width, snapshot.image_height, r.image_format, fov, current_settings().frame_lag, camera_thread,
-            GetCurrentThreadId(), r.eyes[0].width, r.eyes[0].height, current_settings().stereo_steps));
+            GetCurrentThreadId(), r.eyes[0].width, r.eyes[0].height, current_settings().stereo_steps,
+            r.renderer_pairing ? "renderer" : "legacy", r.native_pairs, r.legacy_pairs,
+            s.rendered_frames.load(std::memory_order_relaxed), current_settings().late_rotation));
         r.pairing = {};
     }
     update_status([&](Status& st) {
@@ -802,7 +810,22 @@ void on_present(IDXGISwapChain3* chain, ID3D12CommandQueue* queue) noexcept {
             }
             r.history.push_back(newest);
             while (r.history.size() > static_cast<std::size_t>(options.frame_lag) + 1) r.history.pop_front();
-            const auto match = r.history.size() == static_cast<std::size_t>(options.frame_lag) + 1 ? r.history.front() : std::nullopt;
+            auto match = r.history.size() == static_cast<std::size_t>(options.frame_lag) + 1 ? r.history.front() : std::nullopt;
+            if (options.stereo_mode == 2 && s.render_pose_available.load(std::memory_order_acquire)) {
+                std::lock_guard lock(s.records_mutex);
+                const auto generation = s.recenter_generation.load(std::memory_order_acquire);
+                if (s.rendered && s.rendered->generation == generation && now - s.rendered->sampled < 0.25) {
+                    r.renderer_pairing = true;
+                    match = s.rendered->sequence > r.render_collected ? s.rendered : std::nullopt;
+                    if (match) { r.render_collected = match->sequence; ++r.native_pairs; }
+                } else if (r.renderer_pairing) {
+                    if (!s.rendered || now - s.rendered->sampled > 0.5) {
+                        r.renderer_pairing = false;
+                        log_warning("native rendered-camera capture is stale; using legacy pairing until it resumes.");
+                    } else match.reset();
+                }
+            }
+            if (match && !r.renderer_pairing) ++r.legacy_pairs;
             // Menus are drawn into the image, so they only read on the flat screen.
             const bool vr_camera = camera_active(now) && !s.ui_open.load(std::memory_order_acquire) &&
                 !s.game_menu.load(std::memory_order_acquire);
@@ -835,12 +858,35 @@ void on_present(IDXGISwapChain3* chain, ID3D12CommandQueue* queue) noexcept {
                     params.background_fill = options.gap_fill == 1;
                     params.vignette = eye_vignette();
                     params.steps = static_cast<unsigned>(options.stereo_steps);
+                    params.source_horizontal = std::tan(record.fov.right);
+                    params.source_vertical = std::tan(record.fov.up);
+                    std::array<math::Pose, 2> output_pose{record.left, record.right};
+                    auto output_fov = record.headset_fov;
+                    if (options.late_rotation) {
+                        // Fresh views for this OpenXR frame, not a simulation pose from
+                        // several frames ago. Pixels are rotated into these views below.
+                        std::array<XrView, 2> late{XrView{XR_TYPE_VIEW}, XrView{XR_TYPE_VIEW}};
+                        XrViewLocateInfo locate{XR_TYPE_VIEW_LOCATE_INFO};
+                        locate.viewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
+                        locate.displayTime = r.frame.predictedDisplayTime;
+                        locate.space = r.local;
+                        XrViewState located{XR_TYPE_VIEW_STATE};
+                        std::uint32_t count = 0;
+                        if (XR_SUCCEEDED(s.xr.locate_views(r.session, &locate, &located, 2, &count, late.data())) && count == 2 &&
+                            (located.viewStateFlags & XR_VIEW_STATE_ORIENTATION_VALID_BIT)) {
+                            for (std::size_t e = 0; e < 2; ++e) {
+                                output_pose[e].orientation = to_pose(late[e].pose).orientation;
+                                output_fov[e] = {late[e].fov.angleLeft, late[e].fov.angleRight, late[e].fov.angleUp, late[e].fov.angleDown};
+                                params.rotation[e] = math::late_rotation_basis(record.pose.orientation, output_pose[e].orientation);
+                            }
+                        }
+                    }
                     // Match pixel rays to the Quest/OpenXR runtime eye projections.
                     // The native camera rendered a centred, symmetric frustum;
                     // the shader resamples it into each tracked eye frustum.
                     std::array<bool, 2> mapped{};
                     for (std::size_t e = 0; e < 2; ++e) {
-                        if (const auto uv = math::eye_uv_mapping(record.fov, record.headset_fov[e])) {
+                        if (const auto uv = math::eye_uv_mapping(record.fov, output_fov[e])) {
                             params.u_scale[e] = uv->u_scale;
                             params.v_scale[e] = uv->v_scale;
                             params.u_bias[e] = uv->u_bias;
@@ -856,10 +902,10 @@ void on_present(IDXGISwapChain3* chain, ID3D12CommandQueue* queue) noexcept {
                             r.eye_ready[v] = true;
                             r.eye_records[v] = record;
                             r.eye_records[v].view = v;
-                            r.eye_records[v].pose = v ? record.right : record.left;
+                            r.eye_records[v].pose = output_pose[v];
                             // The depth pass has remapped the image to the actual
                             // headset frustum. Other stereo paths stay symmetric.
-                            if (mapped[v]) r.eye_records[v].fov = record.headset_fov[v];
+                            if (mapped[v]) r.eye_records[v].fov = output_fov[v];
                         }
                         update_status([](Status& st) { st.eye_images += 2; });
                     } else failed = true;

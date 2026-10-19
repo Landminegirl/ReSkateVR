@@ -8,7 +8,8 @@ add_library(dingosdk_vr STATIC
     Extension/VR/vr_stereo.cpp
     Extension/VR/vr_input.cpp
     Extension/VR/vr_gamepad.cpp
-    Extension/VR/vr_hud.cpp)
+    Extension/VR/vr_hud.cpp
+    Extension/VR/vr_render_pose.cpp)
 target_include_directories(dingosdk_vr SYSTEM PUBLIC "${PROJECT_SOURCE_DIR}/External/openxr/include")
 target_link_libraries(dingosdk_vr PUBLIC dingosdk_logging dingosdk_hooks)
 

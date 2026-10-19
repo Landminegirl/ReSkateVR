@@ -1,4 +1,4 @@
-RESKATE VR - QUEST 2 HUD / CONTROLS v4 (EXPERIMENTAL)
+RESKATE VR - QUEST 2 HEAD ROTATION / HUD v5 (EXPERIMENTAL)
 
 INSTALL
 1. Close skate. and ReSkateLauncher. Back up the files from your current build.
@@ -13,7 +13,7 @@ No PowerShell, Python, compiler or scripts are needed to play.
 WHAT CHANGED
 - PLAY launches the standard game; LAUNCH VR starts the headset session.
 - ADDONS > VR > HUD area size brings the game HUD towards the centre.
-  Try 70% first. This keeps text readable; some widgets may ignore safe areas.
+  Defaults to 50%, with a 10%-100% slider. This keeps text readable; some widgets may ignore safe areas.
 - Click and release the LEFT stick to switch first/third person (Xbox or Touch).
   Switching is paused in menus and while the headset is unfocused. The switch
   can be disabled in ADDONS > VR. Both Touch sticks held still recenter.
@@ -22,13 +22,17 @@ WHAT CHANGED
   Raise them to 100% / 48 to restore the previous reconstruction quality.
 - Native HUD settings, depth strength, eye alignment, FOV and pairing stay intact.
 - The v3 rigid head camera and push animation fix are retained.
+- The renderer's actual camera now supplies depth-stereo pose metadata.
+- Late head rotation warps eye pixels into a fresh headset orientation before
+  submission. It targets head-turn jitter separately from game animation FPS.
+  The toggle is enabled by default in ADDONS > VR.
 
 New camera defaults are applied once automatically after your profile loads.
 Later changes are saved normally. Head-centred tracking is a toggle in ADDONS > VR.
 F8 resamples the avatar eye origin as well as recentering headset tracking.
 
 SMOOTHNESS / DISPLAY
-This build changes tracking behavior, not the game's rendering architecture.
+This revision changes pose pairing and adds a late rotational image warp.
 If the game cannot reach the headset frame rate, head turns can still stutter.
 For the next test, use 72 Hz in Link, game frame limit Unlimited, V-Sync Off,
 frame generation Off and motion blur Off. Lower game graphics until it holds
@@ -37,9 +41,10 @@ starting point; the game can replace the launcher's requested square resolution
 when it loads saved display settings. Raise resolution once motion is stable.
 
 TEST STATUS
-Native rotation/lean, push-heading, preset-migration, launch-mode, HUD layout
-and stick-switch gesture checks pass.
-The Windows DLL and launcher compile; all three stereo shaders compile.
+The release build workflow compiles the Windows DLL and launcher, runs native
+pose/projection, HUD and controller regression tests, and compiles all stereo
+shaders before producing a player artifact. Check BUILD.txt for its source commit.
+A successful build is not a physical headset comfort test.
 This revision has not yet been tested on a physical headset.
 The HUD slider changes native safe-area anchors, preserving text size.
 The HUD is the game HUD included in the reconstructed image; edge placement

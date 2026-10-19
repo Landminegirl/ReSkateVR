@@ -104,3 +104,41 @@ Checks cover click hold/release, chord cancellation, focus/menu interruption,
 native-area identity and inset math, eye dimensions, existing projection, head
 camera and launch behavior. Native hooks and HUD widget coverage still require
 physical game/headset validation.
+
+## v5 HUD defaults and head-turn stability
+
+HUD area now starts at 50% and supports 10-100%. Existing profiles receive the
+50% value once on the next Launch VR, then retain subsequent changes.
+
+The old pairing path collected camera writes from a 60 Hz engine thread at
+45-51 presents/s in the user's log, sometimes finding no new write or several.
+A fixed present delay cannot establish the orientation of an interpolated render
+view. The new observer reuses the existing guarded native shader-view hook and
+matches its main-view world matrix against recent issued VR camera transforms.
+It converts observed orientation back through the issued rig-to-tracking transform,
+uses the observed native FOV, and hands that record to the colour snapshot at
+Present. Captured camera metadata stays attached to kept colour/depth. Once
+native pairing is established, a missing observation holds the kept frame rather
+than assigning newer simulation metadata to old pixels. Stale capture falls back
+to legacy pairing with a warning. Capture-to-Present ordering and multi-threaded
+renderer behavior still need verification in the actual game.
+
+Immediately before depth reconstruction the Present thread locates views for the
+current OpenXR frame. The shader transforms target-eye rays into the source-camera
+orientation, projects them into the source image, then performs depth parallax.
+Only warped pixels are submitted with the target orientation. This is a rotational
+warp; it does not synthesize new scene motion or implement positional timewarp.
+Exposed rays outside the source image become black instead of streaking border
+pixels. Very fast turns, source-pose mismatch, and HUD pixels embedded in the scene
+can retain artifacts. The Late head rotation toggle provides an opt-out.
+
+The submitted pose and frustum describe the image: see the
+[OpenXR frame submission guide](https://github.com/KhronosGroup/OpenXR-Guide/blob/main/chapters/frame_submission.md)
+and [projection-layer specification](https://registry.khronos.org/OpenXR/specs/1.1/html/xrspec.html#XrCompositionLayerProjectionView).
+
+Native tests exercise fixed-landmark alignment under 50 Hz source / 90 Hz target
+rotation with pitch and roll, and removal of an 80-degree player rig from observed
+tracking orientation. The existing tests cover camera/eye projection and controls.
+Local shader compilation and Python reference tests pass. Windows C++ compilation
+and those native tests must pass in the release workflow before delivering a player
+ZIP. Physical Quest / Link jitter reduction is not established by these tests.

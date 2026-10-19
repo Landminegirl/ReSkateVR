@@ -33,6 +33,10 @@ jobs:
           Copy-Item build/vs2022-x64/Release/ReSkate.dll dist/
           Copy-Item build/vs2022-x64/Release/ReSkateLauncher.exe dist/
           Copy-Item tools/quest2/PLAY.txt dist/READ_ME_FIRST.txt
+          $sourceCommit = git rev-parse HEAD
+          "Quest 2 head rotation / HUD v5`nSource commit: $sourceCommit`nBuilt and tested by GitHub Actions. Physical headset validation pending." | Set-Content dist/BUILD.txt
+          git archive --format=zip --output=ReSkateVR-Quest2-v5-source.zip HEAD
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Copy-Item External/openxr/LICENSE dist/LICENSE-OpenXR.txt
           python tools/quest2/fetch_openxr_loader.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -47,4 +51,10 @@ jobs:
         with:
           name: ReSkateVR-Quest2-experimental
           path: dist/
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ReSkateVR-Quest2-v5-source
+          path: ReSkateVR-Quest2-v5-source.zip
           if-no-files-found: error

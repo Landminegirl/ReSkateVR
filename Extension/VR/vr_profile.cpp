@@ -35,6 +35,7 @@ constexpr const char* hide_body_foot = "VR.HideBodyFoot";
 constexpr const char* view_mode = "VR.ViewMode";
 constexpr const char* stick_view_switch = "VR.StickViewSwitch";
 constexpr const char* hud_area = "VR.HudArea";
+constexpr const char* late_rotation = "VR.LateRotation";
 constexpr const char* eye_render_scale = "VR.EyeRenderScale";
 constexpr const char* stereo_steps = "VR.StereoSteps";
 constexpr const char* stereo_mode = "VR.StereoMode";
@@ -109,6 +110,7 @@ const std::array fields{
     Field{.key = key::view_mode, .whole = &Settings::view_mode},
     Field{.key = key::stick_view_switch, .flag = &Settings::stick_view_switch},
     Field{.key = key::hud_area, .real = &Settings::hud_area},
+    Field{.key = key::late_rotation, .flag = &Settings::late_rotation},
     Field{.key = key::eye_render_scale, .real = &Settings::eye_render_scale},
     Field{.key = key::stereo_steps, .whole = &Settings::stereo_steps},
     Field{.key = key::stereo_mode, .whole = &Settings::stereo_mode},
@@ -209,14 +211,17 @@ void load() noexcept {
         const bool camera_update = start_vr &&
             !profile_runtime::local_preference("VR.Quest2HeadCameraV2").value_or(false);
         if (camera_update) value = quest2_head_camera(value);
+        const bool hud_update = start_vr && !profile_runtime::local_preference("VR.Quest2HudV5").value_or(false);
+        if (hud_update) value.hud_area = 0.5f;
         value = apply_launch_choice(value, launch_choice);
-        if (set_settings(value) && (first_quest2_launch || camera_update)) {
+        if (set_settings(value) && (first_quest2_launch || camera_update || hud_update)) {
             // Migrate old VR settings once; preserve the player's later adjustments.
             std::vector<std::pair<std::string, Json>> values;
             const auto saved_values = to_json(value);
             for (const auto& field : fields) values.emplace_back(field.key, saved_values[field.key]);
             values.emplace_back("VR.Quest2Setup", Json(true));
             values.emplace_back("VR.Quest2HeadCameraV2", Json(true));
+            values.emplace_back("VR.Quest2HudV5", Json(true));
             profile_runtime::set_local_values(values);
         }
         (void)take_settings_changed(); // The launch choice itself is session-only.

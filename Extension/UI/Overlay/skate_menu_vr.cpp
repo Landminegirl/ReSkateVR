@@ -56,13 +56,15 @@ void vr_controls(SkateMenu& menu, const Model& model, const CallbacksV3& callbac
     ImGui::EndDisabled();
     ImGui::BeginDisabled(!vr::hud_layout_available());
     slider(menu, "HUD area size", "Lower brings scores, objectives and indicators towards the centre; text stays readable.",
-        options.hud_area * 100.0f, 50.0f, 100.0f, "%.0f%%", [&](float v) { options.hud_area = v / 100.0f; changed = true; });
+        options.hud_area * 100.0f, 10.0f, 100.0f, "%.0f%%", [&](float v) { options.hud_area = v / 100.0f; changed = true; });
     ImGui::EndDisabled();
     if (!vr::hud_layout_available()) note("HUD layout control is unavailable for this game build.");
     if (toggle_row(menu, "Left stick switches view", "Click and release L3 to swap first/third person. Both Touch sticks held still recenter.",
             options.stick_view_switch)) changed = true;
     slider(menu, "VR eye resolution", "Lower reduces VR reconstruction work and sharpness without changing the field of view.",
         options.eye_render_scale * 100.0f, 50.0f, 100.0f, "%.0f%%", [&](float v) { options.eye_render_scale = v / 100.0f; changed = true; });
+    if (toggle_row(menu, "Late head rotation", "Rotate reconstructed pixels into the latest headset orientation before submission.",
+            options.late_rotation)) changed = true;
     slider(menu, "Stereo search quality", "Lower uses fewer depth samples for speed; raise if object edges break up.",
         static_cast<float>(options.stereo_steps), 12, 48, "%.0f", [&](float v) { options.stereo_steps = static_cast<int>(v); changed = true; });
     if (primary_button(menu, "Recenter view", vr_status.running)) vr::recenter();
@@ -287,7 +289,7 @@ void vr_controls(SkateMenu& menu, const Model& model, const CallbacksV3& callbac
     if (advanced) {
         slider(menu, "World scale", "Above 1 the world looks smaller.", options.world_scale, Limits::world_scale_min,
             Limits::world_scale_max, "%.2fx", set(options.world_scale));
-        field(menu, "Eye pairing", "Presents between a camera frame and its image. Try the next value if the world looks "
+        field(menu, "Legacy eye pairing", "Used when native renderer pairing is unavailable. Presents between camera and image. Try another value if the world looks "
             "doubled or depth looks inside out.");
         int lag = options.frame_lag;
         if (ImGui::SliderInt("##vr-lag", &lag, 0, Limits::frame_lag_max, "%d", ImGuiSliderFlags_AlwaysClamp)) {

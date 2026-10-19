@@ -30,6 +30,7 @@
 #include "Extension/Assets/map_download.h"
 #include "Extension/Boot/offline_boot.h"
 #include "Extension/HallOfMeat/hall_of_meat.h"
+#include "Extension/HallOfMeat/hall_of_meat_render.h"
 #include "Extension/RoadRash/road_rash.h"
 #include "Extension/BoardBreak/board_break.h"
 #include "Extension/Skater/grind_exit_control.h"
@@ -451,6 +452,9 @@ extern "C" __declspec(dllexport) BOOL WINAPI DingoSDKDebugInitialize() {
         record("{\"event\":\"camera_observer_initialized\",\"active\":" + std::string(camera_hook ? "true" : "false") + "}");
         (void)dingosdk::start_no_bail(r.base);
         const bool meat = dingosdk::hall_of_meat::start(r.base);
+        const bool vr_pose = dingosdk::hall_of_meat::start_render(r.base) &&
+            dingosdk::hall_of_meat::set_render_view_observer(&dingosdk::vr::observe_render_view);
+        dingosdk::vr::set_render_pose_available(vr_pose);
         record("{\"event\":\"hall_of_meat_initialized\",\"active\":" + std::string(meat ? "true" : "false") + "}");
         const bool rash = dingosdk::road_rash::start(r.base);
         record("{\"event\":\"road_rash_initialized\",\"active\":" + std::string(rash ? "true" : "false") + "}");

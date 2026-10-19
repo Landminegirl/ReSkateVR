@@ -33,7 +33,7 @@ double seconds_now() noexcept {
 
 bool valid(const Settings& v) noexcept {
     const auto in = [](float value, float low, float high) { return std::isfinite(value) && value >= low && value <= high; };
-    return in(v.hud_area, 0.5f, 1.0f) && in(v.eye_render_scale, 0.5f, 1.0f) &&
+    return in(v.hud_area, 0.1f, 1.0f) && in(v.eye_render_scale, 0.5f, 1.0f) &&
         v.stereo_steps >= 12 && v.stereo_steps <= 48 && in(v.turn_smoothing, 0, Limits::turn_smoothing_max) &&
         in(v.world_scale, Limits::world_scale_min, Limits::world_scale_max) &&
         in(v.fov_correction, Limits::fov_correction_min, Limits::fov_correction_max) &&
@@ -694,24 +694,33 @@ bool apply_camera(std::array<float, 16>& matrix, CameraWriter writer, const Body
         s.camera_time.store(now, std::memory_order_release);
         s.camera_thread.store(GetCurrentThreadId(), std::memory_order_relaxed);
         c.last_write = now;
-        if (frame_end) {
-            {
-                std::lock_guard records(s.records_mutex);
-                // Record the frustum the game actually receives.
-                // Previously the eye record used the uncorrected FOV.
-                EyeRecord record{s.next_sequence++, view, eye,
-                    math::layer_angles(tangent * options.fov_correction, aspect)};
-                for (std::size_t i = 0; i < 2; ++i)
-                    record.headset_fov[i] = {views[i].fov.angleLeft, views[i].fov.angleRight,
-                        views[i].fov.angleUp, views[i].fov.angleDown};
-                if (side_by_side) {
-                    record.both = true;
-                    record.left = to_pose(views[0].pose);
-                    record.right = to_pose(views[1].pose);
-                }
+        {
+            EyeRecord record{};
+            record.view = view;
+            record.pose = eye;
+            record.fov = math::layer_angles(tangent * options.fov_correction, aspect);
+            record.world = result;
+            record.world_scale = options.world_scale;
+            record.sampled = now;
+            record.generation = recenter;
+            for (std::size_t i = 0; i < 2; ++i)
+                record.headset_fov[i] = {views[i].fov.angleLeft, views[i].fov.angleRight,
+                    views[i].fov.angleUp, views[i].fov.angleDown};
+            if (side_by_side) {
+                record.both = true;
+                record.left = to_pose(views[0].pose);
+                record.right = to_pose(views[1].pose);
+            }
+            std::lock_guard records(s.records_mutex);
+            s.issued.push_back(record);
+            while (s.issued.size() > 128) s.issued.pop_front();
+            if (frame_end) {
+                record.sequence = s.next_sequence++;
                 s.records.push_back(record);
                 while (s.records.size() > 16) s.records.pop_front();
             }
+        }
+        if (frame_end) {
             c.next_view = view ^ 1u;
             s.camera_frames.fetch_add(1, std::memory_order_relaxed);
         }
