@@ -33,7 +33,8 @@ double seconds_now() noexcept {
 
 bool valid(const Settings& v) noexcept {
     const auto in = [](float value, float low, float high) { return std::isfinite(value) && value >= low && value <= high; };
-    return in(v.hud_area, 0.1f, 1.0f) && in(v.eye_render_scale, 0.5f, 1.0f) &&
+    return std::all_of(v.bindings.begin(), v.bindings.end(), controls::valid) &&
+        v.pointer_button >= 0 && v.pointer_button <= 10 && in(v.hud_area, 0.1f, 1.0f) && in(v.eye_render_scale, 0.5f, 1.0f) &&
         v.stereo_steps >= 12 && v.stereo_steps <= 48 && in(v.turn_smoothing, 0, Limits::turn_smoothing_max) &&
         in(v.world_scale, Limits::world_scale_min, Limits::world_scale_max) &&
         in(v.fov_correction, Limits::fov_correction_min, Limits::fov_correction_max) &&

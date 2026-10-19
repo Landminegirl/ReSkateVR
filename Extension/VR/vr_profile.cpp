@@ -87,8 +87,24 @@ struct Field {
     bool Settings::*flag = nullptr;
     float Settings::*real = nullptr;
     int Settings::*whole = nullptr;
+    int binding = -1;
 };
 const std::array fields{
+    Field{.key = "VR.PointerButton", .whole = &Settings::pointer_button},
+    Field{.key = "VR.VoiceToggle", .flag = &Settings::voice_toggle},
+    Field{.key = "VR.Binding0", .binding = 0},
+    Field{.key = "VR.Binding1", .binding = 1},
+    Field{.key = "VR.Binding2", .binding = 2},
+    Field{.key = "VR.Binding3", .binding = 3},
+    Field{.key = "VR.Binding4", .binding = 4},
+    Field{.key = "VR.Binding5", .binding = 5},
+    Field{.key = "VR.Binding6", .binding = 6},
+    Field{.key = "VR.Binding7", .binding = 7},
+    Field{.key = "VR.Binding8", .binding = 8},
+    Field{.key = "VR.Binding9", .binding = 9},
+    Field{.key = "VR.Binding10", .binding = 10},
+    Field{.key = "VR.Binding11", .binding = 11},
+
     Field{.key = key::enabled, .flag = &Settings::enabled},
     Field{.key = key::positional, .flag = &Settings::positional},
     Field{.key = key::level_horizon, .flag = &Settings::level_horizon},
@@ -152,6 +168,9 @@ void inherit_foot_seat(Settings& value) {
 }
 
 void clamp_choices(Settings& value) {
+    value.pointer_button = std::clamp(value.pointer_button, 0, 10);
+    for (std::size_t i = 0; i < value.bindings.size(); ++i)
+        if (!controls::valid(value.bindings[i])) value.bindings[i] = controls::defaults[i];
     value.look_turn_degrees = std::clamp(value.look_turn_degrees, 0, Limits::look_turn_max);
     value.look_turn_style = std::clamp(value.look_turn_style, 0, 1);
     value.smooth_turn_speed = std::clamp(value.smooth_turn_speed, Limits::smooth_turn_speed_min, Limits::smooth_turn_speed_max);
@@ -168,6 +187,7 @@ Json to_json(const Settings& value) {
         if (field.flag) result[field.key] = value.*field.flag;
         if (field.real) result[field.key] = static_cast<double>(value.*field.real);
         if (field.whole) result[field.key] = static_cast<double>(value.*field.whole);
+        if (field.binding >= 0) result[field.key] = value.bindings[static_cast<std::size_t>(field.binding)];
     }
     return result;
 }
@@ -182,6 +202,7 @@ void from_json(const Json& saved, Settings& value) {
         if (!std::isfinite(number) || std::abs(number) > 1e6) continue;
         if (field.real) value.*field.real = static_cast<float>(number);
         if (field.whole) value.*field.whole = static_cast<int>(std::lround(number));
+        if (field.binding >= 0) value.bindings[static_cast<std::size_t>(field.binding)] = static_cast<int>(std::lround(number));
     }
     if (!saved.contains(key::seat_forward_foot)) inherit_foot_seat(value);
     clamp_choices(value);
@@ -196,6 +217,7 @@ void load() noexcept {
             } else if (const auto saved = number(field.key); saved && std::abs(*saved) < 1e6) {
                 if (field.real) value.*field.real = static_cast<float>(*saved);
                 if (field.whole) value.*field.whole = static_cast<int>(std::lround(*saved));
+                if (field.binding >= 0) value.bindings[static_cast<std::size_t>(field.binding)] = static_cast<int>(std::lround(*saved));
             }
         }
         if (!number(key::seat_forward_foot)) inherit_foot_seat(value);

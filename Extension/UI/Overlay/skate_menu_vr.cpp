@@ -1,6 +1,7 @@
 #include "skate_menu_internal.h"
 #include "Extension/VR/vr.h"
 #include "Extension/VR/vr_costume.h"
+#include "Extension/VR/vr_guide.h"
 
 #include <algorithm>
 #include <format>
@@ -34,6 +35,27 @@ void vr_controls(SkateMenu& menu, const Model& model, const CallbacksV3& callbac
     bool changed = false;
     const auto set = [&](auto& member) { return [&](auto v) { member = v; changed = true; }; };
 
+    if (primary_button(menu, "VR tutorial / controls guide", true)) ImGui::OpenPopup("VR tutorial");
+    ImGui::SetNextWindowSize(ImVec2(720, 540), ImGuiCond_Appearing);
+    if (ImGui::BeginPopupModal("VR tutorial", nullptr, ImGuiWindowFlags_NoSavedSettings)) {
+        static int page = 0;
+        const auto& pages = vr::guide::pages;
+        ImGui::Text("%d / 5 - %s", page + 1, pages[page].title);
+        ImGui::BeginChild("guide text", ImVec2(0, -ImGui::GetFrameHeightWithSpacing() * 2));
+        ImGui::TextWrapped("%s", pages[page].text);
+        ImGui::EndChild();
+        if (ImGui::Button("Close")) ImGui::CloseCurrentPopup();
+        ImGui::SameLine();
+        ImGui::BeginDisabled(page == 0);
+        if (ImGui::Button("Back")) --page;
+        ImGui::EndDisabled();
+        ImGui::SameLine();
+        if (ImGui::Button(page == 4 ? "Done" : "Next")) {
+            if (page < 4) ++page;
+            else { page = 0; ImGui::CloseCurrentPopup(); }
+        }
+        ImGui::EndPopup();
+    }
     // ---- Headset: on/off, state, the two main actions.
     begin_card(menu, "vr", "VR HEADSET", "OpenXR: Virtual Desktop, Meta Horizon Link, SteamVR");
     if (toggle_row(menu, "VR", "Show first person in your headset. Start the headset's PC VR app first.", options.enabled))
@@ -59,7 +81,7 @@ void vr_controls(SkateMenu& menu, const Model& model, const CallbacksV3& callbac
         options.hud_area * 100.0f, 10.0f, 100.0f, "%.0f%%", [&](float v) { options.hud_area = v / 100.0f; changed = true; });
     ImGui::EndDisabled();
     if (!vr::hud_layout_available()) note("HUD layout control is unavailable for this game build.");
-    if (toggle_row(menu, "Left stick switches view", "Click and release L3 to swap first/third person. Right stick click recentres.",
+    if (toggle_row(menu, "View-switch shortcut", "Use the Quest input mapped to Switch first / third person, or L3 on a regular gamepad. Right stick click recentres by default.",
             options.stick_view_switch)) changed = true;
     if (toggle_row(menu, "Controller menu pointer", "Point with the right controller and click with its trigger in menus. Off keeps gamepad navigation.",
             options.menu_pointer)) changed = true;
@@ -75,6 +97,10 @@ void vr_controls(SkateMenu& menu, const Model& model, const CallbacksV3& callbac
         vr::Settings recommended;
         recommended.enabled = options.enabled;
         recommended.recenter_key = options.recenter_key;
+        recommended.controllers = options.controllers;
+        recommended.bindings = options.bindings;
+        recommended.pointer_button = options.pointer_button;
+        recommended.voice_toggle = options.voice_toggle;
         options = recommended;
         changed = true;
     }
@@ -226,15 +252,47 @@ void vr_controls(SkateMenu& menu, const Model& model, const CallbacksV3& callbac
 
     // ---- Controls: the headset's controllers as the gamepad.
     begin_card(menu, "vr-controls", "CONTROLS");
-    if (toggle_row(menu, "VR controllers", "Play with the headset's controllers (a gamepad keeps working).", options.controllers))
-        changed = true;
+    int source = options.controllers ? 0 : 1;
+    if (tiles(menu, "Input source", "Head tracking stays on with either choice. Your normal gamepad always works.",
+            "##vr-source", source, {"Quest + gamepad", "Regular gamepad only"})) {
+        options.controllers = source == 0; changed = true;
+    }
+    note("Regular gamepad controls: use the game's own controller settings. ReSkate shortcuts are in Settings > Controls. Your configured keyboard menu key still opens this menu.");
+    info(menu, "Microphone", model.multiplayer.voice.transmitting ? "Transmitting" : model.multiplayer.voice.status);
+    int voice_mode = options.voice_toggle ? 1 : 0;
+    if (tiles(menu, "Voice activation", "With VR on, applies to your Voice talk button and normal keyboard/gamepad push-to-talk binding. Open mic is separate in Online > Voice.",
+            "##vr-voice-mode", voice_mode, {"Hold to talk", "Toggle to talk"})) {
+        options.voice_toggle = voice_mode == 1; changed = true;
+    }
+    note("Enable voice chat and adjust microphone volume in Online > Voice. Set your regular push-to-talk key/controller chord there. Toggle mode resets after focus/session loss or input changes.");
     if (options.controllers) {
-        info(menu, "Right hand", "A push, B other push, hold trigger for D-pad, grip grab (RT)");
-        info(menu, "Left hand", "X board on/off, Y stop, trigger LB, grip grab (LT)");
-        info(menu, "D-pad", "hold right index trigger + left stick (thumbrest also works)");
-        info(menu, "Menu button", "short press: game menu; hold: ReSkate menu");
-        info(menu, "Recenter", "right stick click");
-        info(menu, "Menu pointer", "point with right controller; trigger clicks");
+        note("Choose an action for each Quest control. Changes save automatically. Release all buttons/triggers after rebinding. Sticks retain their normal axes; D-pad shift reserves the left stick while held.");
+        for (std::size_t i = 0; i < options.bindings.size(); ++i) {
+            ImGui::PushID(static_cast<int>(i));
+            field(menu, vr::controls::input_names[i], "Choose a game action, VR shortcut or Voice talk. Not bound disables this input outside menu pointing.");
+            int& selected = options.bindings[i];
+            if (ImGui::BeginCombo("##binding", vr::controls::action_names[static_cast<std::size_t>(selected)])) {
+                for (int action = 0; action < vr::controls::count; ++action)
+                    if (ImGui::Selectable(vr::controls::action_names[static_cast<std::size_t>(action)], selected == action)) {
+                        selected = action; changed = true;
+                    }
+                ImGui::EndCombo();
+            }
+            ImGui::PopID();
+        }
+        field(menu, "Menu click button", "Menus reserve this input for clicking the right-hand ray; its gameplay action is suppressed while pointing.");
+        const char* pointer_name = options.pointer_button == 10 ? "Not bound" : vr::controls::input_names[static_cast<std::size_t>(options.pointer_button)];
+        if (ImGui::BeginCombo("##pointer-button", pointer_name)) {
+            for (int button = 0; button <= 10; ++button)
+                if (ImGui::Selectable(button == 10 ? "Not bound" : vr::controls::input_names[static_cast<std::size_t>(button)], options.pointer_button == button)) {
+                    options.pointer_button = button; changed = true;
+                }
+            ImGui::EndCombo();
+        }
+        if (primary_button(menu, "Reset Quest button bindings", true)) {
+            options.bindings = vr::controls::defaults; options.pointer_button = 5; changed = true;
+        }
+        note("Default: left click switches view, right click recentres; menu short press pauses, hold opens ReSkate. Menu click can be reassigned above. Assign Voice talk to any spare button to talk without the keyboard.");
     }
     end_card();
 

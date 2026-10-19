@@ -44,6 +44,8 @@ Settings load_settings(const fs::path& path) {
         if (!input) return settings;
         const std::string text{std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
         const auto json = Json::parse(text);
+        settings.vr_size = std::clamp(json.value("vr_square_size", settings.vr_size), 720, 3840);
+        settings.vr_guide_version = json.value("vr_guide_version", 0);
         settings.windowed = json.value("windowed", settings.windowed);
         settings.width = std::clamp(json.value("width", settings.width), 320, 16384);
         settings.height = std::clamp(json.value("height", settings.height), 200, 16384);
@@ -82,6 +84,8 @@ Settings load_settings(const fs::path& path) {
 
 void save_settings(const fs::path& path, const Settings& settings) {
     auto json = Json::object();
+    json["vr_square_size"] = settings.vr_size;
+    json["vr_guide_version"] = settings.vr_guide_version;
     json["windowed"] = settings.windowed;
     json["width"] = settings.width;
     json["height"] = settings.height;
@@ -535,7 +539,7 @@ void Launcher::run_play() {
     ignore_mod_problems_ = false;
     set(Phase::launching, "Starting Skate");
     save();
-    auto options = launcher_vr::launch_options(launch_options(settings_), launch_vr);
+    auto options = launcher_vr::launch_options(launch_options(settings_), launch_vr, settings_.vr_size);
     // The launcher's own command line can request offline mode too.
     if (std::find(arguments_.begin(), arguments_.end(), L"-offline") != arguments_.end() ||
         std::find(arguments_.begin(), arguments_.end(), L"--offline") != arguments_.end())

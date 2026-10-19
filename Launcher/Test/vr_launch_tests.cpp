@@ -16,6 +16,14 @@ int main() {
     if (!vr.vr || vr.width != 2048 || vr.height != 2048 || !vr.force_windowed ||
         !vr.offline || vr.map != saved.map) return 2;
     if (saved.width != 2560 || saved.height != 1440 || saved.force_windowed) return 3;
+    for (const int side : {720, 1440, 1600, 2048, 3840}) {
+        const auto chosen = dingosdk::launcher_vr::launch_options(saved, true, side);
+        if (!chosen.force_windowed || chosen.width != static_cast<unsigned>(side) || chosen.height != chosen.width) return 7;
+        const auto desktop = dingosdk::launcher_vr::launch_options(saved, false, side);
+        if (desktop.width != 2560 || desktop.height != 1440 || desktop.force_windowed) return 8;
+    }
+    if (dingosdk::launcher_vr::launch_options(saved, true, -5).width != 720 ||
+        dingosdk::launcher_vr::launch_options(saved, true, 99999).height != 3840) return 9;
     dingosdk::vr::Settings profile;
     profile.enabled = true;
     profile.depth_strength = 0.27f;

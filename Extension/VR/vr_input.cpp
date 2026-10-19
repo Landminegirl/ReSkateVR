@@ -47,6 +47,12 @@ struct Input {
     XrSpace left_space = XR_NULL_HANDLE, aim_space = XR_NULL_HANDLE;
     XrAction aim{};
     math::MenuPress menu_press;
+    math::PressEdge overlay_press;
+    controls::Bindings bindings{};
+    int pointer_binding = -1;
+    std::uint64_t binding_revision = 1;
+    bool wait_release = true, pointer_down = false;
+    bool menu_long_active = false;
     math::PressEdge dpad_press;
     bool dpad_held = false;
     double start_until = 0;
@@ -216,6 +222,10 @@ void input_sync(XrSession session, bool focused) noexcept {
         if (!in.focused) {
             (void)in.menu_press.sample(false, false, seconds_now());
             in.start_until = 0;
+            in.menu_long_active = false;
+            (void)in.overlay_press.sample(false, false);
+            in.pointer_down = false;
+            in.wait_release = true;
             (void)in.dpad_press.sample(false, false);
             in.dpad_held = false;
             std::lock_guard lock(in.mutex);
@@ -235,45 +245,57 @@ void input_sync(XrSession session, bool focused) noexcept {
         const auto ls = stick(session, left), rs = stick(session, right);
         pad.left_x = ls[0];
         pad.left_y = ls[1];
+        const auto options = current_settings();
         const bool menus = shared().ui_open.load(std::memory_order_acquire) || shared().game_menu.load(std::memory_order_acquire);
-        const bool right_trigger = value(session, in.trigger, right) > 0.6f;
-        // Hold the right index trigger to use the left stick as the D-pad.
-        // Menus reserve that trigger for the ray pointer. Thumbrest remains an alternative.
-        if (in.dpad_press.sample(true, right_trigger) && !menus) in.dpad_held = true;
-        if (!right_trigger) in.dpad_held = false;
-        // Keep D-pad ownership until release, even if a direction opens a native menu.
-        const bool dpad_shift = in.dpad_held || pressed(session, in.thumbrest);
+        const bool menu_down = pressed(session, in.menu);
+        const auto gesture = in.menu_press.sample(true, menu_down, now);
+        if (!menu_down) in.menu_long_active = false;
+        if (gesture == math::MenuPress::Action::short_press) in.start_until = now + .15;
+        if (gesture == math::MenuPress::Action::long_press) in.menu_long_active = true;
+        controls::Values raw{pressed(session,in.x) ? 1.f : 0.f, pressed(session,in.y) ? 1.f : 0.f,
+            pressed(session,in.a) ? 1.f : 0.f, pressed(session,in.b) ? 1.f : 0.f,
+            value(session,in.trigger,left), value(session,in.trigger,right),
+            value(session,in.squeeze,left), value(session,in.squeeze,right),
+            pressed(session,in.stick_click,left) ? 1.f : 0.f, pressed(session,in.stick_click,right) ? 1.f : 0.f,
+            now < in.start_until ? 1.f : 0.f, in.menu_long_active ? 1.f : 0.f};
+        if (in.bindings != options.bindings || in.pointer_binding != options.pointer_button) {
+            in.bindings = options.bindings;
+            in.pointer_binding = options.pointer_button;
+            ++in.binding_revision;
+            in.wait_release = true;
+            in.dpad_held = false;
+            in.dpad_press = {};
+            in.overlay_press = {};
+            cancel_menu_pointer();
+        }
+        if (in.wait_release) {
+            if (std::none_of(raw.begin(), raw.end(), [](float v) { return v > .6f; })) in.wait_release = false;
+            else raw.fill(0);
+        }
+        const bool shift = controls::down(options.bindings, raw, controls::dpad_shift);
+        if (in.dpad_press.sample(true, shift) && !menus) in.dpad_held = true;
+        if (!shift) in.dpad_held = false;
         std::uint16_t dpad = 0;
-        if (dpad_shift) {
+        const bool thumbrest_shift = std::find(options.bindings.begin(), options.bindings.end(), controls::dpad_shift) != options.bindings.end() && pressed(session, in.thumbrest);
+        if (in.dpad_held || thumbrest_shift) {
             if (ls[1] > 16000) dpad |= XINPUT_GAMEPAD_DPAD_UP;
             if (ls[1] < -16000) dpad |= XINPUT_GAMEPAD_DPAD_DOWN;
             if (ls[0] < -16000) dpad |= XINPUT_GAMEPAD_DPAD_LEFT;
             if (ls[0] > 16000) dpad |= XINPUT_GAMEPAD_DPAD_RIGHT;
             pad.left_x = pad.left_y = 0;
         }
-        pad.right_x = rs[0];
-        pad.right_y = rs[1];
-        // The grips grab (game triggers); the triggers are the bumpers.
-        pad.left_trigger = static_cast<std::uint8_t>(std::lround(value(session, in.squeeze, left) * 255));
-        pad.right_trigger = static_cast<std::uint8_t>(std::lround(value(session, in.squeeze, right) * 255));
-        std::uint16_t buttons = 0;
-        if (value(session, in.trigger, left) > 0.6f) buttons |= XINPUT_GAMEPAD_LEFT_SHOULDER;
-        if (menus && !in.dpad_held && !current_settings().menu_pointer && right_trigger) buttons |= XINPUT_GAMEPAD_RIGHT_SHOULDER;
-        // Pushes on the right hand, board on / off and stop on the left.
-        if (pressed(session, in.a)) buttons |= XINPUT_GAMEPAD_A;
-        if (pressed(session, in.b)) buttons |= XINPUT_GAMEPAD_X;
-        if (pressed(session, in.x)) buttons |= XINPUT_GAMEPAD_Y;
-        if (pressed(session, in.y)) buttons |= XINPUT_GAMEPAD_B;
-        // Left stick switches view; right stick recentres. Neither reserved click
-        // reaches the game (right click used to activate native camera controls).
-        pad.left_click = pressed(session, in.stick_click, left);
-        pad.right_click = pressed(session, in.stick_click, right);
-        if (pad.left_click && !current_settings().stick_view_switch) buttons |= XINPUT_GAMEPAD_LEFT_THUMB;
-        const auto menu_action = in.menu_press.sample(true, pressed(session, in.menu), now);
-        if (menu_action == math::MenuPress::Action::long_press) overlay::menu_open_flag().store(true);
-        if (menu_action == math::MenuPress::Action::short_press) in.start_until = now + 0.15;
-        if (now < in.start_until) buttons |= XINPUT_GAMEPAD_START;
-        pad.buttons = static_cast<std::uint16_t>(buttons | dpad);
+        in.pointer_down = !in.wait_release && !in.dpad_held && options.pointer_button < 10 &&
+            raw[static_cast<std::size_t>(options.pointer_button)] > .6f;
+        const auto routed = controls::route(options.bindings, raw, menus && options.menu_pointer, options.pointer_button);
+        pad.right_x = rs[0]; pad.right_y = rs[1];
+        pad.left_trigger = static_cast<std::uint8_t>(std::lround(routed.left_trigger * 255));
+        pad.right_trigger = static_cast<std::uint8_t>(std::lround(routed.right_trigger * 255));
+        pad.left_click = routed.view;
+        pad.right_click = routed.center;
+        pad.voice_down = routed.voice;
+        pad.binding_revision = in.binding_revision;
+        if (in.overlay_press.sample(true, routed.menu)) overlay::menu_open_flag().store(true);
+        pad.buttons = static_cast<std::uint16_t>(routed.buttons | dpad);
         std::lock_guard lock(in.mutex);
         in.pad = pad;
         in.updated = now;
@@ -305,7 +327,7 @@ bool right_aim_pose(XrSpace base, XrTime time, math::Pose& out, bool& trigger) n
     if (XR_FAILED(shared().xr.locate_space(in.aim_space, base, time, &location)) || (location.locationFlags & valid) != valid)
         return false;
     out = to_pose(location.pose);
-    trigger = !in.dpad_held && value(shared().session, in.trigger, in.hands[1]) > 0.6f;
+    trigger = in.pointer_down;
     return true;
 }
 

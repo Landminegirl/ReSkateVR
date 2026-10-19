@@ -15,6 +15,7 @@
 //   apply_camera / camera_fov    engine thread (first-person camera writes)
 //   on_present / after_present   the game's Present thread (overlay hook)
 //   everything else              any thread
+#include "vr_bindings.h"
 #include <array>
 #include <atomic>
 #include <cstdint>
@@ -80,6 +81,9 @@ struct Settings {
     bool lens_effects_off = true;
     // The headset's controllers act as the gamepad (pad 0, merged with a real pad).
     bool controllers = true;
+    controls::Bindings bindings = controls::defaults;
+    int pointer_button = 5; // 0..9 physical input, 10 disables click (ray still visible).
+    bool voice_toggle = false;
     // Depth stereo edges: pixels the near depth is widened by (0-3; more keeps soft
     // edges on their object, less keeps narrow gaps open), and how holes behind near
     // objects are filled: 1 background, 0 stretched near edge.
@@ -300,6 +304,8 @@ void set_depth_copy(bool enabled) noexcept;
 // A gamepad state the overlay's XInput hook merges into pad 0 (sticks -32768..32767,
 // XINPUT_GAMEPAD_* buttons, triggers 0..255).
 struct VirtualPad {
+    bool voice_down = false;
+    std::uint64_t binding_revision = 0;
     bool left_click = false, right_click = false;
     bool active = false;
     std::uint16_t buttons = 0;

@@ -432,7 +432,7 @@ void frame(Launcher& launcher, const Fonts& fonts, HWND window, Ui& ui, ModsPane
             ui.steam_offline = !launcher.settings().offline && !launcher_app::steam_signed_in();
         }
     }
-    const bool modal = ui.settings || ui.changelog || ui.legal.open >= 0 || ui.legal.agreement || ui.mods || ui.sign_in || qr_open || state.prompt.has_value() ||
+    const bool modal = ui.vr_guide || ui.settings || ui.changelog || ui.legal.open >= 0 || ui.legal.agreement || ui.mods || ui.sign_in || qr_open || state.prompt.has_value() ||
         ui.steam_offline || state.phase == Phase::mods_broken || ui.mods_update_prompt;
 
     ImGui::SetNextWindowPos(ImVec2(0, 0));
@@ -495,6 +495,11 @@ void frame(Launcher& launcher, const Fonts& fonts, HWND window, Ui& ui, ModsPane
         case Phase::game_outdated: open_sign_in(launcher, ui, false); break;
         case Phase::downloading: launcher.cancel(); break;
         case Phase::ready:
+            if (launch_vr && launcher.settings().vr_guide_version < 1) {
+                ui.vr_guide = ui.vr_guide_launch = true;
+                ui.vr_guide_page = 0;
+                break;
+            }
             launcher.select_launch(launch_vr);
             // Mods with updates waiting: ask first, once a session. Playing on
             // the old version is a choice, not a mistake, so it stays offered.
@@ -577,6 +582,7 @@ void frame(Launcher& launcher, const Fonts& fonts, HWND window, Ui& ui, ModsPane
     // Opened from Settings or the agreement, and back to it when closed.
     else if (ui.legal.open >= 0) legal_window(fonts, size, ui);
     else if (ui.legal.agreement) legal_agreement_window(launcher, fonts, size, ui, window);
+    else if (ui.vr_guide) vr_guide_window(launcher, fonts, size, ui);
     else if (ui.settings) settings_window(launcher, fonts, size, ui, window);
     else if (ui.changelog) {
         ui.notes.prereleases = launcher.settings().prereleases;

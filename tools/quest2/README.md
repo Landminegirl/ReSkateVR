@@ -173,3 +173,25 @@ remains available, and Controller menu pointer is an opt-out.
 Regression coverage adds menu threshold/hold/focus behavior, single-press recenter,
 trigger drag cancellation, panel edges/backface/rotation, beam placement and repeated
 tracking-origin resets. The v5 late-head-rotation shader is unchanged.
+
+
+## v8 setup and controls
+
+Launcher Settings > VR saves a single square side, independently of standard
+PLAY settings. The launch path reapplies it after argument parsing. The runtime
+continues to reject exclusive fullscreen/maximize and constrains square resizing.
+The first VR launch opens a five-page guide; closing cancels startup and only
+finishing acknowledges it. It can be replayed in the launcher or headset menu.
+
+ADDONS > VR > CONTROLS selects Quest + gamepad or Regular gamepad only.
+Twelve Quest inputs (including short/hold menu gestures) map to game buttons,
+VR shortcuts, D-pad shift or Voice talk. The click input for the right-hand
+ray is separate and consumes its gameplay action in menus. Bindings and voice
+mode are profile values and preset fields; reset bindings does not alter comfort.
+Changes require releasing controls so held inputs cannot activate a new mapping.
+
+The voice worker combines Quest Voice talk with the existing keyboard/controller
+PTT gate, then applies hold/toggle activation while VR is enabled. A release is
+required after binding/source/mode/session changes. Existing host policy, focus,
+menu, peer and microphone-volume gates remain in force. Open mic stays separate.
+Steam capture and headset UX are not established by the pure routing/latch tests.

@@ -1,4 +1,5 @@
 #include "multiplayer_menu_internal.h"
+#include "Extension/VR/vr.h"
 #include "input_capture.h"
 #include "skate_style.h"
 #include "Extension/UI/skate_theme.h"
@@ -247,8 +248,14 @@ void voice_controls(SkateMenu &menu, const MultiplayerModel &mp) {
             if (ImGui::SmallButton("Cancel binding")) menu.voice_bind_capture = 0;
         }
     }
-    if (!value.push_to_talk && !value.controller_combo && !value.open_mic)
-        warn("Assign a key or controller combo to talk, or turn on Open microphone.");
+    const auto vr_options = vr::settings();
+    const bool vr_talk_bound = vr_options.enabled && vr_options.controllers &&
+        std::find(vr_options.bindings.begin(), vr_options.bindings.end(), vr::controls::voice_talk) != vr_options.bindings.end();
+    if (!value.push_to_talk && !value.controller_combo && !value.open_mic && !vr_talk_bound)
+        warn("Assign a key, controller combo or VR Voice talk button, or turn on Open microphone.");
+    if (vr_options.enabled && !value.open_mic)
+        note(vr_options.voice_toggle ? "VR: Toggle to talk is selected in Addons > VR. Press your talk binding again to stop."
+                                    : "VR: Hold to talk is selected in Addons > VR. Quest Voice talk buttons are set there.");
     ImGui::EndDisabled();
     ImGui::Dummy(ImVec2(0, px(2)));
 

@@ -43,6 +43,52 @@ Quat pitch(float radians) { return {std::sin(radians / 2), 0, 0, std::cos(radian
 
 int main() {
     {
+        namespace control = dingosdk::vr::controls;
+        auto bindings = control::defaults;
+        control::Values raw{};
+        raw[0] = raw[2] = 1;
+        auto routed = control::route(bindings, raw, false, 5);
+        CHECK(routed.buttons == (0x8000 | 0x1000));
+        bindings[0] = control::voice_talk;
+        routed = control::route(bindings, raw, false, 5);
+        CHECK(routed.voice && routed.buttons == 0x1000);
+        routed = control::route(bindings, raw, true, 0);
+        CHECK(!routed.voice && routed.buttons == 0x1000); // menu click cannot also talk
+        raw = {}; raw[6] = .75f;
+        CHECK(near(control::route(bindings, raw, false, 5).left_trigger, .75f));
+        bindings[6] = control::recenter;
+        CHECK(control::route(bindings, raw, false, 5).center);
+        CHECK(control::route(bindings, raw, false, 5).left_trigger == 0);
+        raw = {}; raw[10] = 1;
+        CHECK(control::route(bindings, raw, false, 5).buttons == 0x10);
+        bindings[10] = control::none;
+        CHECK(control::route(bindings, raw, false, 5).buttons == 0);
+        raw = {}; raw[5] = raw[8] = raw[9] = 1;
+        routed = control::route(control::defaults, raw, false, 5);
+        CHECK(routed.view && routed.center && control::down(control::defaults, raw, control::dpad_shift));
+        bindings = control::defaults; bindings[5] = control::game_a;
+        CHECK(control::route(bindings, raw, false, 5).buttons == 0x1000);
+        CHECK(control::route(bindings, raw, true, 5).buttons == 0);
+        CHECK(control::route(bindings, raw, true, 10).buttons == 0x1000); // click unbound
+        control::TalkGate gate;
+        CHECK(!gate.update(true, true, true, 1)); // held on entry cannot start microphone
+        CHECK(!gate.update(true, false, true, 1));
+        CHECK(gate.update(true, true, true, 1));
+        CHECK(gate.update(true, false, true, 1)); // toggle stays on after release
+        CHECK(!gate.update(true, true, true, 1)); // next press stops
+        CHECK(!gate.update(false, true, true, 1)); // focus/session loss clears latch
+        CHECK(!gate.update(true, true, true, 1)); // release before rearming
+        CHECK(!gate.update(true, false, true, 1));
+        CHECK(gate.update(true, true, true, 1));
+        CHECK(!gate.update(true, true, true, 2)); // rebind clears latch while held
+        CHECK(!gate.update(true, false, false, 2)); // switch to hold
+        CHECK(gate.update(true, true, false, 2));
+        CHECK(!gate.update(true, false, false, 2));
+        dingosdk::vr::Settings saved;
+        saved.bindings[0] = control::voice_talk;
+        CHECK(dingosdk::vr::quest2_balanced(saved).bindings[0] == control::voice_talk);
+    }
+    {
         DepthFramePairing pair;
         CHECK(!pair.accepts(0));
         pair.keep(10);

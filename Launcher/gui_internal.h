@@ -186,6 +186,8 @@ inline PadFeed* g_pad_feed{};
 // ---------------------------------------------------------------- settings
 
 struct Settings {
+    int vr_size{2048};
+    int vr_guide_version{};
     bool windowed{};
     int width{1920};
     int height{1080};
@@ -404,6 +406,8 @@ struct GamePages {
 
 // Panels the main screen can show; one at a time.
 struct Ui {
+    bool vr_guide{}, vr_guide_launch{};
+    int vr_guide_page{};
     bool settings{};
     GamePages game;
     bool changelog{};
@@ -666,6 +670,7 @@ void legal_window(const Fonts& fonts, ImVec2 size, Ui& ui);
 void check_legal_versions(Ui& ui, const Settings& settings);
 // "I agree" to the current versions, or quit.
 void legal_agreement_window(Launcher& launcher, const Fonts& fonts, ImVec2 size, Ui& ui, HWND window);
+void vr_guide_window(Launcher& launcher, const Fonts& fonts, ImVec2 size, Ui& ui);
 void settings_window(Launcher& launcher, const Fonts& fonts, ImVec2 size, Ui& ui, HWND window);
 void mods_window(Launcher& launcher, const Fonts& fonts, ImVec2 size, Ui& ui, ModsPanel& panel, HWND window);
 // Shown instead of launching when the merge left mods out.

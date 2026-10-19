@@ -1,4 +1,4 @@
-RESKATE VR - QUEST 2 CONTROLS / SQUARE WINDOW v7 (EXPERIMENTAL)
+RESKATE VR - QUEST 2 CONTROLS / SETUP GUIDE v8 (EXPERIMENTAL)
 
 INSTALL
 1. Close skate. and ReSkateLauncher. Back up the files from your current build.
@@ -10,7 +10,29 @@ INSTALL
 
 No PowerShell, Python, compiler or scripts are needed to play.
 
-WHAT CHANGED
+WHAT CHANGED IN v8
+- Launcher Settings > VR has one Square size slider (720-3840 pixels).
+  Width and height always match; VR keeps fullscreen/maximize blocked.
+  The size is saved separately from standard PLAY display settings.
+- Your first LAUNCH VR opens a five-page tutorial before starting the game.
+  Finish it to continue; Close cancels. Replay it from Launcher Settings > VR
+  or the VR tutorial / controls guide button in ADDONS > VR.
+- ADDONS > VR > CONTROLS > Input source switches between Quest + gamepad
+  and Regular gamepad only. Head tracking stays on. Gamepad-only uses the
+  standard ReSkate keyboard/controller menu bindings to open settings.
+- Each Quest face button, trigger, grip, stick click and short/hold menu
+  gesture has an action dropdown. Not bound disables that gameplay input.
+  Menu click button is separately configurable. Release inputs after rebinding.
+  Reset Quest button bindings restores defaults. Bindings save to your profile.
+- Assign a spare Quest control to Voice talk and choose Hold to talk or
+  Toggle to talk. Voice talk is unbound by default. Toggle mode also applies
+  to the normal keyboard/controller PTT binding while VR is enabled.
+  Enable Voice chat and set microphone volume in ONLINE > VOICE; choose your
+  voice input in Steam. Open microphone mode remains a separate setting.
+  Opening ReSkate menus, losing focus/session or rebinding clears talk state.
+  Live voice capture and Quest UI interaction still need in-game validation.
+
+RETAINED CONTROLS / VR FEATURES
 - PLAY launches the standard game; LAUNCH VR starts the headset session.
 - ADDONS > VR > HUD area size brings the game HUD towards the centre.
   Defaults to 50%, with a 10%-100% slider. This keeps text readable; some widgets may ignore safe areas.
