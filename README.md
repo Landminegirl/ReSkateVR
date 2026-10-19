@@ -1,5 +1,7 @@
 # ReSkateVR — OpenXR update: changes from the original VR build
 
+*********************************************************************************************************************************************
+
 Built on **cesarcc2’s ReSkateVR** and the work of the **ReSkate contributors**.
 This list compares our update with the original VR branch at commit
 [`b19a2c9`](https://github.com/Landminegirl/ReSkateVR/commit/b19a2c920364223fffc874fd2350806aac8fdcdf).
@@ -97,7 +99,7 @@ remain the original projects’ work. The changes below are our additions and re
 
 
 
-
+*********************************************************************************************************************************************
 
 
 
