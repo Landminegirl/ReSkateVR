@@ -239,8 +239,10 @@ void load() noexcept {
         if (camera_update) value = quest2_head_camera(value);
         const bool hud_update = start_vr && !profile_runtime::local_preference("VR.Quest2HudV5").value_or(false);
         if (hud_update) value.hud_area = 0.5f;
+        const bool framing_update = start_vr && !profile_runtime::local_preference("VR.SharperDefaultV10").value_or(false);
+        if (framing_update) value.efficient_fov = true;
         value = apply_launch_choice(value, launch_choice);
-        if (set_settings(value) && (first_quest2_launch || camera_update || hud_update)) {
+        if (set_settings(value) && (first_quest2_launch || camera_update || hud_update || framing_update)) {
             // Migrate old VR settings once; preserve the player's later adjustments.
             std::vector<std::pair<std::string, Json>> values;
             const auto saved_values = to_json(value);
@@ -248,8 +250,10 @@ void load() noexcept {
             values.emplace_back("VR.Quest2Setup", Json(true));
             values.emplace_back("VR.Quest2HeadCameraV2", Json(true));
             values.emplace_back("VR.Quest2HudV5", Json(true));
+            values.emplace_back("VR.SharperDefaultV10", Json(true));
             profile_runtime::set_local_values(values);
         }
+        controller_profile_ready();
         (void)take_settings_changed(); // The launch choice itself is session-only.
 
         // Saved presets: a JSON list of {name, settings}, stored as text.

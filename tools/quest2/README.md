@@ -226,3 +226,20 @@ latest user's source log was roughly 60 presents/s at a 72 Hz headset. 90 Hz
 comfort/artifact improvement still requires hardware testing.
 
 Input batch ordering follows [Microsoft SendInput documentation](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-sendinput).
+
+
+## v10 startup input and default framing
+
+Sharper source framing defaults on. A one-time VR.SharperDefaultV10 profile migration
+also enables it for older VR profiles; subsequent manual changes remain saved.
+Virtual XInput pad0 now supplies GetCapabilities as well as GetState, so discovery
+can recognize it before OpenXR input becomes active. Real device capabilities,
+other slots, invalid requests and standard/gamepad-only launch choices are retained.
+The launcher grants foreground permission before the child startup callback can
+hide it or show the startup splash. No repeated focus-stealing or synthetic click
+is used. These changes target initial pause-menu input but still need headset tests.
+
+The inspected 90 Hz run was ~80 presents/s at2165square (camera60/s). Sharper framing
+was active and headset presentation pacing was off. This is consistent with a frame
+budget issue, not evidence that 90 Hz artifacts are resolved. The public change list
+is CHANGES_FROM_ORIGINAL.md; it credits original VR work separately from our changes.

@@ -101,7 +101,7 @@ struct Settings {
     float hud_area = 0.5f;
     bool late_rotation = true;
     bool headset_pacing = true;
-    bool efficient_fov = false; // Reversible source framing; preserve previous calibration by default.
+    bool efficient_fov = true; // Use measured FOV framing by default; previous correction remains saved.
     bool menu_pointer = true;
     // Eye reconstruction resolution and ray search quality, independent of scene FOV.
     float eye_render_scale = 0.75f;
@@ -151,6 +151,13 @@ struct Settings {
     // Virtual-key code that recenters the view; 0 disables it. Default F8.
     int recenter_key = 0x77;
 };
+
+inline bool virtual_controller_requested(bool enabled, bool controllers, bool profile_ready, char launch_choice) noexcept {
+    if (!controllers) return false;
+    if (profile_ready) return enabled;
+    if (launch_choice == '0') return false;
+    return enabled || launch_choice == '1';
+}
 
 // An explicit standard start must override a previously saved VR-on preference.
 inline Settings apply_launch_choice(Settings value, char choice) noexcept {
@@ -324,6 +331,7 @@ VirtualPad controller_pad() noexcept;
 void observe_gamepad(std::uint32_t user, std::int16_t right_x, std::uint8_t trigger) noexcept;
 // Pad 0 reports connected from the game's first poll (VR controllers on).
 bool controllers_connected() noexcept;
+void controller_profile_ready() noexcept;
 // The right stick X of a DirectInput gamepad (DualShock 4 / DualSense), read directly
 // (vr_gamepad.cpp); 0 when there is none.
 std::int16_t directinput_right_x() noexcept;

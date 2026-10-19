@@ -33,9 +33,10 @@ jobs:
           Copy-Item build/vs2022-x64/Release/ReSkate.dll dist/
           Copy-Item build/vs2022-x64/Release/ReSkateLauncher.exe dist/
           Copy-Item tools/quest2/PLAY.txt dist/READ_ME_FIRST.txt
+          Copy-Item tools/quest2/CHANGES_FROM_ORIGINAL.md dist/CHANGES_FROM_ORIGINAL.md
           $sourceCommit = git rev-parse HEAD
-          "OpenXR controls / framing v9`nSource commit: $sourceCommit`nBuilt and tested by GitHub Actions. Physical headset validation pending." | Set-Content dist/BUILD.txt
-          git archive --format=zip --output=ReSkateVR-OpenXR-v9-source.zip HEAD
+          "OpenXR startup input / framing v10`nSource commit: $sourceCommit`nBuilt and tested by GitHub Actions. Physical headset validation pending." | Set-Content dist/BUILD.txt
+          git archive --format=zip --output=ReSkateVR-OpenXR-v10-source.zip HEAD
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Copy-Item External/openxr/LICENSE dist/LICENSE-OpenXR.txt
           python tools/quest2/fetch_openxr_loader.py
@@ -55,6 +56,6 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ReSkateVR-OpenXR-v9-source
-          path: ReSkateVR-OpenXR-v9-source.zip
+          name: ReSkateVR-OpenXR-v10-source
+          path: ReSkateVR-OpenXR-v10-source.zip
           if-no-files-found: error

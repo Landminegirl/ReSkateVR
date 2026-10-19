@@ -865,6 +865,12 @@ DWORD start_game(const Session& session, const launcher::LaunchOptions& options,
             CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT, nullptr, paths.directory.c_str(),
             &startup, &process)) win32_failure(L"CreateProcessW(Skate.exe)");
     ChildProcess child(process);
+    // Explicitly pass the foreground permission from the launching application
+    // to the resumed game so its first window can activate without an alt-tab.
+    if (options.vr) {
+        const bool allowed = AllowSetForegroundWindow(child.id()) != FALSE;
+        logging::log(logging::Level::info, logging::Channel::launcher, "VR startup foreground handoff: {}", allowed ? "allowed" : "not granted by Windows");
+    }
     if (created) created(child.id());
     logging::write(logging::Level::info, logging::Channel::launcher, L"Created suspended Skate.exe process " + std::to_wstring(child.id()));
 

@@ -348,9 +348,17 @@ void input_stop() noexcept {
 }
 }
 
+void controller_profile_ready() noexcept { detail::shared().profile_ready.store(true, std::memory_order_release); }
+
 bool controllers_connected() noexcept {
     try {
-        return detail::current_settings().controllers;
+        static const char launch_choice = [] {
+            wchar_t text[2]{};
+            return GetEnvironmentVariableW(L"RESKATE_VR_LAUNCH", text, 2) == 1 ? static_cast<char>(text[0]) : '\0';
+        }();
+        const auto options = detail::current_settings();
+        return virtual_controller_requested(options.enabled, options.controllers,
+            detail::shared().profile_ready.load(std::memory_order_acquire), launch_choice);
     } catch (...) {
         return false;
     }
