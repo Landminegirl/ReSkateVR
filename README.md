@@ -57,14 +57,32 @@ remain the original projects’ work. The changes below are our additions and re
 ## Controls and voice
 
 - Added a default **left-stick click/release** shortcut to switch first/third person.
+
+<img width="2560" height="1440" alt="thirdpersonswap" src="https://github.com/user-attachments/assets/049a6175-48dd-46ae-a21e-9579debfa0bc" />
+
 - Added default **right-stick click** recentering for gameplay and the flat menu panel.
+
+<img width="2560" height="1440" alt="recenter camera player" src="https://github.com/user-attachments/assets/06f7ffa4-ff34-4cb2-9419-856e20edceb3" />
+
 - Changed the menu button: short press opens the game menu; hold opens ReSkate’s
   menu instead of sending the filming-mode button.
+
+  <img width="2560" height="1440" alt="Menusettingsbutton" src="https://github.com/user-attachments/assets/8e5adad7-1379-4303-be35-e4f90e6b01c0" />
+
 - Added default **right index trigger + left stick** D-pad input, retaining the
   thumbrest alternative. The hold remains active through the menu it opens.
+
+  <img width="2560" height="1440" alt="quickmenusettings" src="https://github.com/user-attachments/assets/7dfb7cb4-51a3-448a-a14a-67b154c5e58d" />
+
 - Added saved, remappable actions for face buttons, triggers, grips, stick clicks
   and short/hold menu gestures. The ray-click button is separately configurable.
+
+  <img width="1012" height="710" alt="rebinbg" src="https://github.com/user-attachments/assets/533c00b1-efb2-42d3-af27-2adc14e8b20c" />
+
 - Added an explicit **Regular gamepad only** option alongside VR controllers plus
+
+  <img width="765" height="147" alt="gamepoad" src="https://github.com/user-attachments/assets/e713af7c-7ff3-4428-bf04-eed881bcba51" />
+
   gamepad, while keeping headset tracking enabled.
 - Added a bindable VR **Voice talk** action and **Hold to talk / Toggle to talk**
   modes. In VR, the chosen mode also works with existing keyboard/gamepad PTT binds.
