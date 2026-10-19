@@ -33,6 +33,43 @@ struct StickViewSwitch {
         return toggle;
     }
 };
+// A hold fires once at the threshold; release fires a short press only if not held.
+struct MenuPress {
+    bool ready = false, down = false, held = false;
+    double since = 0;
+    enum class Action { none, short_press, long_press };
+    Action sample(bool active, bool pressed, double now) noexcept {
+        if (!active) { ready = down = held = false; return Action::none; }
+        if (!ready) { ready = true; down = pressed; held = pressed; return Action::none; }
+        if (pressed && !down) { since = now; held = false; }
+        auto action = Action::none;
+        if (pressed && !held && now - since >= 0.6) { held = true; action = Action::long_press; }
+        if (!pressed && down && !held) action = now - since >= 0.6 ? Action::long_press : Action::short_press;
+        down = pressed;
+        return action;
+    }
+};
+struct PressEdge {
+    bool ready = false, down = false;
+    bool sample(bool active, bool pressed) noexcept {
+        if (!active) { ready = down = false; return false; }
+        if (!ready) { ready = true; down = pressed; return false; }
+        const bool result = pressed && !down;
+        down = pressed;
+        return result;
+    }
+};
+// Click only after a released trigger has been seen in this UI context. Losing
+// tracking or leaving the panel releases a drag and requires a new press.
+struct PointerClick {
+    bool armed = false, down = false;
+    bool sample(bool active, bool pressed) noexcept {
+        if (!active) { armed = down = false; return false; }
+        if (!pressed) { armed = true; down = false; }
+        else down = armed;
+        return down;
+    }
+};
 // Insets compose with the game's existing safe area; 100% is exactly unchanged.
 inline std::array<float, 4> hud_margins(const std::array<float, 4>& native, float area) {
     area = std::clamp(area, 0.1f, 1.0f);
@@ -49,6 +86,44 @@ struct Pose {
     Quat orientation{0, 0, 0, 1};
     Vec3 position{};
 };
+
+struct PanelHit {
+    float u = 0, v = 0, distance = 0;
+    Vec3 point{};
+};
+inline std::optional<PanelHit> ray_panel(const Pose& aim, const Pose& panel, float width, float height) {
+    if (!(width > 0) || !(height > 0)) return std::nullopt;
+    const auto inverse = first_person::conjugate(panel.orientation);
+    const auto origin = first_person::rotate(inverse, first_person::subtract(aim.position, panel.position));
+    const auto direction = first_person::rotate(inverse, first_person::rotate(aim.orientation, {0,0,-1}));
+    if (!std::isfinite(direction[2]) || direction[2] >= -0.00001f || origin[2] < 0) return std::nullopt;
+    const float distance = -origin[2] / direction[2];
+    const float u = .5f + (origin[0] + direction[0] * distance) / width;
+    const float v = .5f - (origin[1] + direction[1] * distance) / height;
+    if (!std::isfinite(u) || !std::isfinite(v) || distance < 0 || distance > 50 || u < 0 || u > 1 || v < 0 || v > 1)
+        return std::nullopt;
+    auto point = aim.position;
+    const auto forward = first_person::rotate(aim.orientation, {0,0,-1});
+    for (unsigned i = 0; i < 3; ++i) point[i] += forward[i] * distance;
+    return PanelHit{u, v, distance, point};
+}
+inline std::optional<Pose> beam_pose(const Vec3& start, const Vec3& end, const Vec3& viewer) {
+    const auto delta = first_person::subtract(end, start);
+    const float length = first_person::length(delta);
+    if (!std::isfinite(length) || length < .001f) return std::nullopt;
+    Vec3 up{}, centre{};
+    for (unsigned i = 0; i < 3; ++i) { up[i] = delta[i] / length; centre[i] = (start[i] + end[i]) * .5f; }
+    const auto cross = [](const Vec3& a, const Vec3& b) { return Vec3{a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]}; };
+    auto right = cross(up, first_person::subtract(viewer, centre));
+    if (first_person::length(right) < .0001f) right = cross(up, {0,1,0});
+    if (first_person::length(right) < .0001f) right = cross(up, {1,0,0});
+    const float right_length = first_person::length(right);
+    for (auto& v : right) v /= right_length;
+    const auto normal = cross(right, up);
+    Matrix matrix{};
+    for (unsigned i = 0; i < 3; ++i) { matrix[i] = right[i]; matrix[4+i] = up[i]; matrix[8+i] = normal[i]; }
+    return Pose{first_person::orientation(matrix), centre};
+}
 
 // Where "straight ahead" is in the tracking space, set by recentering.
 struct Anchor {
@@ -272,6 +347,13 @@ inline Quat rendered_tracking_orientation(const Matrix& issued_world, const Quat
         first_person::multiply(first_person::conjugate(first_person::orientation(issued_world)),
             first_person::orientation(rendered_world))));
 }
+struct DepthFramePairing {
+    std::uint64_t color_present = 0;
+    bool pending = false, ready = false;
+    void keep(std::uint64_t present) { color_present = present; pending = true; ready = false; }
+    bool accepts(std::uint64_t copied_present) const { return pending && copied_present == color_present; }
+    void complete() { pending = false; ready = true; }
+};
 using RotationBasis = std::array<Vec3, 3>;
 inline RotationBasis late_rotation_basis(const Quat& source, const Quat& target) {
     const auto rotation = first_person::normalized(first_person::multiply(first_person::conjugate(source), target));

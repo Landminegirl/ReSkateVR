@@ -158,6 +158,7 @@ struct State {
     std::atomic<bool> prompt_input_active{false}; // DingoSDKOverlaySetPromptInputCapture
     bool show_on_ready = false;
     bool force_windowed = false;
+    bool force_square = false; // VR launch: keep the client and render image square.
     // Client size requested by the launcher (RESKATE_WINDOW_WIDTH/HEIGHT); 0 keeps the game's.
     UINT forced_width = 0, forced_height = 0;
     HANDLE stop_event = nullptr;

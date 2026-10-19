@@ -67,10 +67,13 @@ Settings settings() noexcept { return detail::current_settings(); }
 bool set_settings(const Settings& value) noexcept {
     if (!valid(value)) return false;
     auto& s = detail::shared();
+    bool view_changed = false;
     {
         std::lock_guard lock(s.settings_mutex);
+        view_changed = s.settings.view_mode != value.view_mode || s.settings.head_centred != value.head_centred;
         s.settings = value;
     }
+    if (view_changed) recenter(); // New view starts around the headset's current pose.
     s.settings_changed.store(true, std::memory_order_release);
     return true;
 }
@@ -217,7 +220,10 @@ void observe_gamepad(std::uint32_t user, std::int16_t right_x, std::uint8_t trig
         if (std::abs(x.load(std::memory_order_relaxed)) > std::abs(strongest)) strongest = x.load(std::memory_order_relaxed);
     right_stick_x.store(strongest, std::memory_order_relaxed);
 }
-void recenter() noexcept { detail::shared().recenter_generation.fetch_add(1, std::memory_order_acq_rel); }
+void recenter() noexcept {
+    cancel_menu_pointer();
+    detail::shared().recenter_generation.fetch_add(1, std::memory_order_acq_rel);
+}
 
 namespace {
 using namespace detail;
@@ -350,6 +356,13 @@ bool apply_camera(std::array<float, 16>& matrix, CameraWriter writer, const Body
                         options.frame_lag, options.head_centred ? 0 : options.frame_lag));
             }
             c.recenter_applied = recenter;
+            c.bail = c.grab = c.outside = false;
+            c.grab_seen = c.tilted_since = c.upright_since = 0;
+            c.lift = 0;
+            c.boom = 1;
+            c.turn_ready = false;
+            c.turn_held = false;
+            c.rig_time = c.origin_time = 0;
             c.heading = std::numeric_limits<float>::quiet_NaN();
             c.travel = std::numeric_limits<float>::quiet_NaN();
             c.velocity = {};

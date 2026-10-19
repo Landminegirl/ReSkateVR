@@ -1,6 +1,7 @@
 #include "overlay_internal.h"
 #include "cursor.h"
 #include "input_capture.h"
+#include "Extension/VR/vr.h"
 #include "Engine/Core/Log/logging.h"
 #include <array>
 #include <cfloat>
@@ -233,6 +234,24 @@ void update_menu_pointer() {
     const bool watching = !active && s.hub_pointer.load() && s.input_attached && !s.stop && !s.failed &&
                           game_window_foreground(s.window);
     io.AddFocusEvent(active || watching);
+    // A single mouse source owns each frame. Desktop polling used to enqueue a
+    // release before every VR press; ImGui's event trickling then broke clicks/drags.
+    static bool vr_owned = false;
+    const auto pointer = dingosdk::vr::menu_pointer();
+    if (active && pointer.active) {
+        dingosdk::overlay::menu_pad_in_charge().store(false);
+        io.MouseDrawCursor = true;
+        io.AddMousePosEvent(pointer.hovering ? pointer.u * io.DisplaySize.x : -FLT_MAX,
+            pointer.hovering ? pointer.v * io.DisplaySize.y : -FLT_MAX);
+        io.AddMouseButtonEvent(0, pointer.down);
+        for (int button = 1; button < 5; ++button) io.AddMouseButtonEvent(button, false);
+        vr_owned = true;
+        return;
+    }
+    if (vr_owned) {
+        io.AddMouseButtonEvent(0, false);
+        vr_owned = false;
+    }
     // The controller in charge of the full screen menu: no pointer until the mouse moves or a button
     // of it is pressed.
     // (The real pointer and buttons: these reads are the game's, faked, outside OverlayInputAccess.)

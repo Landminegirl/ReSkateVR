@@ -135,4 +135,7 @@ inline XrPosef to_xr(const math::Pose& pose) {
     return result;
 }
 bool left_hand_pose(XrSpace base, XrTime time, math::Pose& out) noexcept;
+bool right_aim_pose(XrSpace base, XrTime time, math::Pose& out, bool& trigger) noexcept;
+void publish_menu_pointer(HWND window, bool active, const std::optional<math::PanelHit>& hit, bool trigger, bool overlay) noexcept;
+void release_menu_pointer() noexcept;
 }

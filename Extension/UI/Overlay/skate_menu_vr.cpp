@@ -59,8 +59,10 @@ void vr_controls(SkateMenu& menu, const Model& model, const CallbacksV3& callbac
         options.hud_area * 100.0f, 10.0f, 100.0f, "%.0f%%", [&](float v) { options.hud_area = v / 100.0f; changed = true; });
     ImGui::EndDisabled();
     if (!vr::hud_layout_available()) note("HUD layout control is unavailable for this game build.");
-    if (toggle_row(menu, "Left stick switches view", "Click and release L3 to swap first/third person. Both Touch sticks held still recenter.",
+    if (toggle_row(menu, "Left stick switches view", "Click and release L3 to swap first/third person. Right stick click recentres.",
             options.stick_view_switch)) changed = true;
+    if (toggle_row(menu, "Controller menu pointer", "Point with the right controller and click with its trigger in menus. Off keeps gamepad navigation.",
+            options.menu_pointer)) changed = true;
     slider(menu, "VR eye resolution", "Lower reduces VR reconstruction work and sharpness without changing the field of view.",
         options.eye_render_scale * 100.0f, 50.0f, 100.0f, "%.0f%%", [&](float v) { options.eye_render_scale = v / 100.0f; changed = true; });
     if (toggle_row(menu, "Late head rotation", "Rotate reconstructed pixels into the latest headset orientation before submission.",
@@ -227,11 +229,12 @@ void vr_controls(SkateMenu& menu, const Model& model, const CallbacksV3& callbac
     if (toggle_row(menu, "VR controllers", "Play with the headset's controllers (a gamepad keeps working).", options.controllers))
         changed = true;
     if (options.controllers) {
-        info(menu, "Right hand", "A push, B other push, trigger RB, grip grab (RT)");
+        info(menu, "Right hand", "A push, B other push, hold trigger for D-pad, grip grab (RT)");
         info(menu, "Left hand", "X board on/off, Y stop, trigger LB, grip grab (LT)");
-        info(menu, "D-pad", "right thumb on the thumbrest + left stick");
-        info(menu, "Menu button", "Start; hold for Back");
-        info(menu, "Recenter", "hold both stick clicks for 1 s");
+        info(menu, "D-pad", "hold right index trigger + left stick (thumbrest also works)");
+        info(menu, "Menu button", "short press: game menu; hold: ReSkate menu");
+        info(menu, "Recenter", "right stick click");
+        info(menu, "Menu pointer", "point with right controller; trigger clicks");
     }
     end_card();
 

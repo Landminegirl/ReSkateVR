@@ -90,6 +90,8 @@ struct DepthCopy {
     std::atomic<ID3D12Resource*> source{};
     std::atomic<bool> enabled{};
     std::atomic<std::uint64_t> copies{};
+    std::uint64_t copied_present = 0;
+    ID3D12Resource* copied_source = nullptr;
 };
 DepthCopy& depth_copy() {
     static auto* value = new DepthCopy;
@@ -113,6 +115,9 @@ DXGI_FORMAT typeless(DXGI_FORMAT format) {
 void copy_before_clear(ID3D12GraphicsCommandList* list, ID3D12Resource* depth) {
     auto& c = depth_copy();
     std::lock_guard lock(c.mutex);
+    const auto frame = present_count.load(std::memory_order_acquire);
+    // Later clears may belong to effects/UI and no longer contain the scene.
+    if (c.copies.load(std::memory_order_relaxed) && c.copied_present == frame && c.copied_source == depth) return;
     const auto desc = depth->GetDesc();
     const auto format = typeless(desc.Format);
     if (format == DXGI_FORMAT_UNKNOWN) return;
@@ -186,6 +191,8 @@ void copy_before_clear(ID3D12GraphicsCommandList* list, ID3D12Resource* depth) {
     list->CopyTextureRegion(&target, 0, 0, 0, &source_rows, nullptr);
     barriers[0].Transition = {c.staging.Get(), 0, D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_COPY_DEST};
     list->ResourceBarrier(1, barriers.data());
+    c.copied_present = frame;
+    c.copied_source = depth;
     c.copies.fetch_add(1, std::memory_order_relaxed);
 }
 
@@ -206,7 +213,7 @@ void STDMETHODCALLTYPE clear_dsv(ID3D12GraphicsCommandList* list, D3D12_CPU_DESC
                     }
             }
             auto& c = depth_copy();
-            if (resource && c.enabled.load(std::memory_order_acquire) && resource == c.source.load(std::memory_order_acquire))
+            if (resource && count == 0 && c.enabled.load(std::memory_order_acquire) && resource == c.source.load(std::memory_order_acquire))
                 copy_before_clear(list, resource);
         }
     } catch (...) {}
@@ -266,11 +273,12 @@ void start_depth_probe() noexcept {
 
 
 namespace detail {
-ComPtr<ID3D12Resource> depth_texture() {
+DepthSnapshot depth_snapshot() {
     auto& c = depth_copy();
     std::lock_guard lock(c.mutex);
-    return c.texture;
+    return {c.texture, c.copied_present, c.texture && c.copies.load(std::memory_order_relaxed) != 0};
 }
+std::uint64_t depth_present() noexcept { return present_count.load(std::memory_order_acquire); }
 }
 
 

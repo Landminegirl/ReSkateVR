@@ -105,8 +105,10 @@ With **VR controllers** on, the headset's controllers act as the gamepad (a game
 | Grips | LT / RT (grabs) |
 | Triggers | LB / RB |
 | Right thumb on the thumbrest + left stick | D-pad |
-| Menu button | Start (hold: Back) |
-| Both stick clicks held 1 s | Recenter |
+| Menu button | Game menu (short press); ReSkate menu (hold 0.6 s) |
+| Left stick click | First / third person |
+| Right stick click | Recenter |
+| Right controller aim + trigger (menus) | Laser pointer and click |
 
 Look turns also read pads the game does not report through XInput pad 0 (Steam Input's virtual pad,
 a DualShock 4 or DualSense through DirectInput).

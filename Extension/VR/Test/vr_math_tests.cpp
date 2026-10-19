@@ -43,6 +43,81 @@ Quat pitch(float radians) { return {std::sin(radians / 2), 0, 0, std::cos(radian
 
 int main() {
     {
+        DepthFramePairing pair;
+        CHECK(!pair.accepts(0));
+        pair.keep(10);
+        CHECK(!pair.accepts(9)); // stale clear while the skater/camera moved
+        CHECK(!pair.ready);
+        CHECK(pair.accepts(10));
+        pair.complete();
+        CHECK(pair.ready && !pair.pending);
+        CHECK(!pair.accepts(10)); // duplicate clears cannot replace a complete pair
+        pair.keep(11);
+        CHECK(!pair.ready && !pair.accepts(12)); // skipped clear: never borrow a later frame
+        pair.keep(12);
+        CHECK(pair.accepts(12)); // resume on a newly kept colour
+        pair = {}; // resize, menu transition or recenter invalidates both
+        CHECK(!pair.ready && !pair.accepts(12));
+    }
+    {
+        MenuPress menu;
+        CHECK(menu.sample(true, false, 0) == MenuPress::Action::none);
+        CHECK(menu.sample(true, true, 1) == MenuPress::Action::none);
+        CHECK(menu.sample(true, false, 1.2) == MenuPress::Action::short_press);
+        CHECK(menu.sample(true, true, 2) == MenuPress::Action::none);
+        CHECK(menu.sample(true, true, 2.7) == MenuPress::Action::long_press);
+        CHECK(menu.sample(true, true, 3) == MenuPress::Action::none);
+        CHECK(menu.sample(true, false, 3.1) == MenuPress::Action::none);
+        (void)menu.sample(true, true, 4);
+        (void)menu.sample(false, true, 4.2);
+        CHECK(menu.sample(true, true, 5) == MenuPress::Action::none);
+        CHECK(menu.sample(true, false, 6) == MenuPress::Action::none);
+        PressEdge recenter;
+        CHECK(!recenter.sample(true, false));
+        CHECK(recenter.sample(true, true));
+        CHECK(!recenter.sample(true, true));
+        CHECK(!recenter.sample(true, false));
+        CHECK(recenter.sample(true, true));
+        PointerClick click;
+        CHECK(!click.sample(true, true)); // entering a menu with trigger held
+        CHECK(!click.sample(true, false));
+        CHECK(click.sample(true, true));
+        CHECK(click.sample(true, true)); // drag
+        CHECK(!click.sample(false, true)); // tracking/panel loss releases
+        CHECK(!click.sample(true, true));
+        CHECK(!click.sample(true, false));
+        CHECK(click.sample(true, true));
+        const Pose aim{}, panel{{0,0,0,1}, {0,0,-2}};
+        const auto hit = ray_panel(aim, panel, 2, 1);
+        CHECK(hit && near(hit->u,.5f) && near(hit->v,.5f) && near(hit->distance,2));
+        CHECK(!ray_panel(Pose{{0,1,0,0},{}}, panel, 2, 1)); // points away
+        CHECK(!ray_panel(Pose{{0,0,0,1},{1.1f,0,0}}, panel, 2, 1)); // misses edge
+        const auto edge = ray_panel(Pose{{0,0,0,1},{.8f,.2f,0}}, panel, 2, 1);
+        CHECK(edge && near(edge->u,.9f) && near(edge->v,.3f));
+        const auto rotate = yaw(.7f);
+        const auto move_pose = [&](Pose p) {
+            p.orientation = first_person::multiply(rotate, p.orientation);
+            p.position = first_person::add({1,2,3}, first_person::rotate(rotate,p.position));
+            return p;
+        };
+        const auto moved = ray_panel(move_pose(aim), move_pose(panel), 2, 1);
+        CHECK(moved && near(moved->u,.5f) && near(moved->v,.5f));
+        const auto beam = beam_pose({.3f,-.3f,0}, {0,0,-2}, {0,0,0});
+        CHECK(beam && near(beam->position, Vec3{.15f,-.15f,-1}));
+        CHECK(!beam_pose({0,0,0},{0,0,0},{0,0,1}));
+        // Repeated view changes/recentres: the current HMD pose maps back to
+        // the native eye, rather than retaining an earlier physical offset.
+        Matrix base{}; first_person::write(base, yaw(0), {2,1.7f,3});
+        for (int mode = 0; mode < 8; ++mode) {
+            Pose head{yaw(mode*.1f), {.05f*mode,1.6f,.03f*mode}};
+            const auto anchor = anchor_from(head);
+            const auto view = compose(base, 0, true, head, head, anchor, true, 1);
+            CHECK(near(Vec3{view[12],view[13],view[14]}, Vec3{2,1.7f,3}));
+            CHECK(near(row(view,2),Vec3{0,0,1}));
+        }
+    }
+
+    {
         CHECK(near(dingosdk::vr::Settings{}.hud_area, .5f));
         const std::array<float, 4> native{};
         const auto smaller = hud_margins(native, .1f);

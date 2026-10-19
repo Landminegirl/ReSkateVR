@@ -1,14 +1,15 @@
 // VR controllers as a gamepad: OpenXR actions (Touch and Index bindings) are read on
 // the Present thread each headset frame and handed to the game as XInput pad 0 by
 // ReSkate's XInput hook, merged with a physical pad.
-//   sticks, stick clicks -> the same; grips -> LT / RT (grabs); triggers -> LB / RB
+//   sticks -> the same; grips -> LT / RT (grabs); left trigger -> LB
 //   right A B -> A, X (both pushes on the right hand); left X Y -> Y (board on / off), B (stop)
 //   (Index: a / b on each hand)
-//   menu (Index: left trackpad press) -> Start on a short press, Back while held
-//   right thumb on the thumbrest (Index: right trackpad touched) -> the left stick is the D-pad
-//   both stick clicks held 1 s -> recentre the view
+//   menu (Index: left trackpad press) -> Start on short press, ReSkate menu on hold
+//   hold right index trigger (or touch right thumbrest) -> left stick is the D-pad
+//   left stick click -> view mode; right stick click -> recenter
 #include "vr_internal.h"
 #include "Engine/Core/Log/logging.h"
+#include "Extension/UI/Overlay/overlay.h"
 #include <Xinput.h>
 #include <algorithm>
 #include <array>
@@ -36,18 +37,20 @@ struct Input {
     PFN_xrGetActionStateBoolean get_boolean{};
     PFN_xrGetActionStateFloat get_float{};
     PFN_xrGetActionStateVector2f get_vector{};
+    PFN_xrGetActionStatePose get_pose{};
     PFN_xrCreateActionSpace create_action_space{};
 
     XrActionSet set = XR_NULL_HANDLE;
     std::array<XrPath, 2> hands{}; // left, right
     XrAction stick{}, stick_click{}, trigger{}, squeeze{}, menu{}, a{}, b{}, x{}, y{}, thumbrest{};
     XrAction left_grip{};                 // the left hand's pose, for the chat panel
-    XrSpace left_space = XR_NULL_HANDLE;
-    // Menu: Start on release of a short press, Back once held.
-    double menu_since = 0, start_until = 0;
-    bool menu_was = false;
-    double recenter_since = 0;
-    bool recentred = false;
+    XrSpace left_space = XR_NULL_HANDLE, aim_space = XR_NULL_HANDLE;
+    XrAction aim{};
+    math::MenuPress menu_press;
+    math::PressEdge dpad_press;
+    bool dpad_held = false;
+    double start_until = 0;
+    bool focused = false;
 
     std::mutex mutex;
     VirtualPad pad;
@@ -132,6 +135,7 @@ bool input_start(XrInstance instance, XrSession session, PFN_xrGetInstanceProcAd
             !load(get, instance, "xrGetActionStateBoolean", in.get_boolean) ||
             !load(get, instance, "xrGetActionStateFloat", in.get_float) ||
             !load(get, instance, "xrGetActionStateVector2f", in.get_vector) ||
+            !load(get, instance, "xrGetActionStatePose", in.get_pose) ||
             !load(get, instance, "xrCreateActionSpace", in.create_action_space)) {
             log_info("Controllers unavailable: the runtime lacks an input function.");
             return false;
@@ -149,19 +153,21 @@ bool input_start(XrInstance instance, XrSession session, PFN_xrGetInstanceProcAd
             !make_action(XR_ACTION_TYPE_BOOLEAN_INPUT, "stick_click", "Stick click", true, in.stick_click) ||
             !make_action(XR_ACTION_TYPE_FLOAT_INPUT, "trigger", "Trigger", true, in.trigger) ||
             !make_action(XR_ACTION_TYPE_FLOAT_INPUT, "grip", "Grip (bumper)", true, in.squeeze) ||
-            !make_action(XR_ACTION_TYPE_BOOLEAN_INPUT, "menu", "Start / Back", false, in.menu) ||
+            !make_action(XR_ACTION_TYPE_BOOLEAN_INPUT, "menu", "Game / ReSkate menu", false, in.menu) ||
             !make_action(XR_ACTION_TYPE_BOOLEAN_INPUT, "button_a", "A", false, in.a) ||
             !make_action(XR_ACTION_TYPE_BOOLEAN_INPUT, "button_b", "B", false, in.b) ||
             !make_action(XR_ACTION_TYPE_BOOLEAN_INPUT, "button_x", "X", false, in.x) ||
             !make_action(XR_ACTION_TYPE_BOOLEAN_INPUT, "button_y", "Y", false, in.y) ||
             !make_action(XR_ACTION_TYPE_BOOLEAN_INPUT, "dpad_shift", "D-pad (left stick)", false, in.thumbrest) ||
-            !make_action(XR_ACTION_TYPE_POSE_INPUT, "left_hand", "Left hand", false, in.left_grip)) {
+            !make_action(XR_ACTION_TYPE_POSE_INPUT, "left_hand", "Left hand", false, in.left_grip) ||
+            !make_action(XR_ACTION_TYPE_POSE_INPUT, "menu_aim", "Menu pointer", true, in.aim)) {
             log_info("Controllers unavailable: creating an action failed.");
             return false;
         }
         const bool touch = suggest(instance, "/interaction_profiles/oculus/touch_controller",
             {{in.stick, "/user/hand/left/input/thumbstick"}, {in.stick, "/user/hand/right/input/thumbstick"},
                 {in.left_grip, "/user/hand/left/input/grip/pose"},
+                {in.aim, "/user/hand/right/input/aim/pose"},
                 {in.stick_click, "/user/hand/left/input/thumbstick/click"},
                 {in.stick_click, "/user/hand/right/input/thumbstick/click"},
                 {in.trigger, "/user/hand/left/input/trigger/value"}, {in.trigger, "/user/hand/right/input/trigger/value"},
@@ -172,6 +178,7 @@ bool input_start(XrInstance instance, XrSession session, PFN_xrGetInstanceProcAd
         const bool index = suggest(instance, "/interaction_profiles/valve/index_controller",
             {{in.stick, "/user/hand/left/input/thumbstick"}, {in.stick, "/user/hand/right/input/thumbstick"},
                 {in.left_grip, "/user/hand/left/input/grip/pose"},
+                {in.aim, "/user/hand/right/input/aim/pose"},
                 {in.stick_click, "/user/hand/left/input/thumbstick/click"},
                 {in.stick_click, "/user/hand/right/input/thumbstick/click"},
                 {in.trigger, "/user/hand/left/input/trigger/value"}, {in.trigger, "/user/hand/right/input/trigger/value"},
@@ -190,8 +197,11 @@ bool input_start(XrInstance instance, XrSession session, PFN_xrGetInstanceProcAd
         space.action = in.left_grip;
         space.poseInActionSpace.orientation.w = 1;
         if (XR_FAILED(in.create_action_space(session, &space, &in.left_space))) in.left_space = XR_NULL_HANDLE;
-        log_info(std::format("Controllers ready (bindings: Touch {}, Index {}; left hand pose {}).", touch ? "yes" : "no",
-            index ? "yes" : "no", in.left_space ? "yes" : "no"));
+        space.action = in.aim;
+        space.subactionPath = in.hands[1];
+        if (XR_FAILED(in.create_action_space(session, &space, &in.aim_space))) in.aim_space = XR_NULL_HANDLE;
+        log_info(std::format("Controllers ready (bindings: Touch {}, Index {}; left hand pose {}, right aim {}).", touch ? "yes" : "no",
+            index ? "yes" : "no", in.left_space ? "yes" : "no", in.aim_space ? "yes" : "no"));
         return true;
     } catch (...) {
         return false;
@@ -202,7 +212,17 @@ void input_sync(XrSession session, bool focused) noexcept {
     try {
         auto& in = input();
         if (!in.set) return;
-        if (!focused) return;
+        in.focused = focused && current_settings().enabled && current_settings().controllers;
+        if (!in.focused) {
+            (void)in.menu_press.sample(false, false, seconds_now());
+            in.start_until = 0;
+            (void)in.dpad_press.sample(false, false);
+            in.dpad_held = false;
+            std::lock_guard lock(in.mutex);
+            in.pad = {};
+            in.updated = -100;
+            return;
+        }
         XrActiveActionSet active{in.set, XR_NULL_PATH};
         XrActionsSyncInfo info{XR_TYPE_ACTIONS_SYNC_INFO};
         info.countActiveActionSets = 1;
@@ -215,9 +235,16 @@ void input_sync(XrSession session, bool focused) noexcept {
         const auto ls = stick(session, left), rs = stick(session, right);
         pad.left_x = ls[0];
         pad.left_y = ls[1];
-        // Right thumb on the thumbrest: the left stick is the D-pad (and does not move the skater).
+        const bool menus = shared().ui_open.load(std::memory_order_acquire) || shared().game_menu.load(std::memory_order_acquire);
+        const bool right_trigger = value(session, in.trigger, right) > 0.6f;
+        // Hold the right index trigger to use the left stick as the D-pad.
+        // Menus reserve that trigger for the ray pointer. Thumbrest remains an alternative.
+        if (in.dpad_press.sample(true, right_trigger) && !menus) in.dpad_held = true;
+        if (!right_trigger) in.dpad_held = false;
+        // Keep D-pad ownership until release, even if a direction opens a native menu.
+        const bool dpad_shift = in.dpad_held || pressed(session, in.thumbrest);
         std::uint16_t dpad = 0;
-        if (pressed(session, in.thumbrest)) {
+        if (dpad_shift) {
             if (ls[1] > 16000) dpad |= XINPUT_GAMEPAD_DPAD_UP;
             if (ls[1] < -16000) dpad |= XINPUT_GAMEPAD_DPAD_DOWN;
             if (ls[0] < -16000) dpad |= XINPUT_GAMEPAD_DPAD_LEFT;
@@ -231,35 +258,20 @@ void input_sync(XrSession session, bool focused) noexcept {
         pad.right_trigger = static_cast<std::uint8_t>(std::lround(value(session, in.squeeze, right) * 255));
         std::uint16_t buttons = 0;
         if (value(session, in.trigger, left) > 0.6f) buttons |= XINPUT_GAMEPAD_LEFT_SHOULDER;
-        if (value(session, in.trigger, right) > 0.6f) buttons |= XINPUT_GAMEPAD_RIGHT_SHOULDER;
+        if (menus && !in.dpad_held && !current_settings().menu_pointer && right_trigger) buttons |= XINPUT_GAMEPAD_RIGHT_SHOULDER;
         // Pushes on the right hand, board on / off and stop on the left.
         if (pressed(session, in.a)) buttons |= XINPUT_GAMEPAD_A;
         if (pressed(session, in.b)) buttons |= XINPUT_GAMEPAD_X;
         if (pressed(session, in.x)) buttons |= XINPUT_GAMEPAD_Y;
         if (pressed(session, in.y)) buttons |= XINPUT_GAMEPAD_B;
-        // Both stick clicks held a second recentre the view (and are not passed on).
-        const bool left_click = pressed(session, in.stick_click, left), right_click = pressed(session, in.stick_click, right);
-        pad.left_click = left_click;
-        pad.right_click = right_click;
-        if (left_click && right_click) {
-            if (in.recenter_since == 0) in.recenter_since = now;
-            if (!in.recentred && now - in.recenter_since > 1.0) {
-                recenter();
-                in.recentred = true;
-                log_info("Recentred (controllers).");
-            }
-        } else {
-            in.recenter_since = 0;
-            in.recentred = false;
-            if (left_click && !current_settings().stick_view_switch) buttons |= XINPUT_GAMEPAD_LEFT_THUMB;
-            if (right_click) buttons |= XINPUT_GAMEPAD_RIGHT_THUMB;
-        }
-        // Menu: a short press taps Start (on release); held past 0.6 s it holds Back.
-        const bool menu = pressed(session, in.menu);
-        if (menu && !in.menu_was) in.menu_since = now;
-        if (menu && now - in.menu_since > 0.6) buttons |= XINPUT_GAMEPAD_BACK;
-        if (!menu && in.menu_was && now - in.menu_since <= 0.6) in.start_until = now + 0.15;
-        in.menu_was = menu;
+        // Left stick switches view; right stick recentres. Neither reserved click
+        // reaches the game (right click used to activate native camera controls).
+        pad.left_click = pressed(session, in.stick_click, left);
+        pad.right_click = pressed(session, in.stick_click, right);
+        if (pad.left_click && !current_settings().stick_view_switch) buttons |= XINPUT_GAMEPAD_LEFT_THUMB;
+        const auto menu_action = in.menu_press.sample(true, pressed(session, in.menu), now);
+        if (menu_action == math::MenuPress::Action::long_press) overlay::menu_open_flag().store(true);
+        if (menu_action == math::MenuPress::Action::short_press) in.start_until = now + 0.15;
         if (now < in.start_until) buttons |= XINPUT_GAMEPAD_START;
         pad.buttons = static_cast<std::uint16_t>(buttons | dpad);
         std::lock_guard lock(in.mutex);
@@ -281,8 +293,29 @@ bool left_hand_pose(XrSpace base, XrTime time, math::Pose& out) noexcept {
     return true;
 }
 
+bool right_aim_pose(XrSpace base, XrTime time, math::Pose& out, bool& trigger) noexcept {
+    auto& in = input();
+    if (!in.focused || !in.aim_space || !base) return false;
+    const auto info = get_info(in.aim, in.hands[1]);
+    XrActionStatePose state{XR_TYPE_ACTION_STATE_POSE};
+    if (XR_FAILED(in.get_pose(shared().session, &info, &state)) || !state.isActive) return false;
+    XrSpaceLocation location{XR_TYPE_SPACE_LOCATION};
+    constexpr auto valid = XR_SPACE_LOCATION_ORIENTATION_VALID_BIT | XR_SPACE_LOCATION_POSITION_VALID_BIT |
+        XR_SPACE_LOCATION_ORIENTATION_TRACKED_BIT | XR_SPACE_LOCATION_POSITION_TRACKED_BIT;
+    if (XR_FAILED(shared().xr.locate_space(in.aim_space, base, time, &location)) || (location.locationFlags & valid) != valid)
+        return false;
+    out = to_pose(location.pose);
+    trigger = !in.dpad_held && value(shared().session, in.trigger, in.hands[1]) > 0.6f;
+    return true;
+}
+
 void input_stop() noexcept {
     auto& in = input();
+    if (in.aim_space && shared().xr.destroy_space) shared().xr.destroy_space(in.aim_space);
+    in.aim_space = XR_NULL_HANDLE;
+    in.focused = false;
+    in.dpad_held = false;
+    in.dpad_press = {};
     if (in.left_space && shared().xr.destroy_space) shared().xr.destroy_space(in.left_space);
     in.left_space = XR_NULL_HANDLE;
     if (in.set && in.destroy_action_set) in.destroy_action_set(in.set);

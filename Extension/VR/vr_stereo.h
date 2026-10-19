@@ -7,6 +7,7 @@
 #include <d3d12.h>
 #include <wrl/client.h>
 #include <array>
+#include <cstdint>
 #include <string>
 #include <unordered_map>
 
@@ -31,7 +32,13 @@ struct StereoParams {
 };
 
 // The scene depth copy (vr_depth.cpp): typeless, COPY_DEST between uses; null until copied.
-Microsoft::WRL::ComPtr<ID3D12Resource> depth_texture();
+struct DepthSnapshot {
+    Microsoft::WRL::ComPtr<ID3D12Resource> texture;
+    std::uint64_t present = 0;
+    bool valid = false;
+};
+DepthSnapshot depth_snapshot();
+std::uint64_t depth_present() noexcept;
 
 class DepthStereo {
 public:

@@ -142,3 +142,34 @@ tracking orientation. The existing tests cover camera/eye projection and control
 Local shader compilation and Python reference tests pass. Windows C++ compilation
 and those native tests must pass in the release workflow before delivering a player
 ZIP. Physical Quest / Link jitter reduction is not established by these tests.
+
+## v6 view centering and menu interaction
+
+Changing view mode or head-centred tracking now requests a recenter. The camera
+resets HMD anchor, rigid eye origin, heading, outside/bail/grab state, boom/lift,
+turn state and motion timing. Menu pointer drags cancel before recentering.
+Right-stick click recentres once per press, including menus. Left-stick click
+retains first/third-person switching; a concurrent right click cancels that gesture.
+
+The menu-button gesture sends Start only after a short release. At 0.6 seconds it
+opens ReSkate once and suppresses both Back/filming input and a short-release event.
+Held buttons across focus loss require release before arming again.
+
+A right-hand OpenXR aim action casts a -Z ray into the actual theatre quad.
+The optional pointer draws a controller-origin beam and crosshair as tiny
+alpha compositor quads. Their GPU descriptors/allocators are fence protected;
+layer count respects the runtime limit, and visual failures skip optional layers.
+The menu panel recentres on opening. See the
+[OpenXR quad definition](https://registry.khronos.org/OpenXR/specs/1.1/man/html/XrCompositionLayerQuad.html).
+
+ReSkate gets pointer input on its ImGui thread. Native game menus get absolute
+mouse motion/button events only while the game window is foreground. Right trigger
+is reserved for pointing only while menus and the pointer are enabled. Trigger
+holds across menu/context entry do not click until released. Ray/panel loss, focus
+loss, recenter, stopping VR and teardown release owned presses. Native menu widget
+compatibility and actual pointer visuals still need Quest testing; gamepad navigation
+remains available, and Controller menu pointer is an opt-out.
+
+Regression coverage adds menu threshold/hold/focus behavior, single-press recenter,
+trigger drag cancellation, panel edges/backface/rotation, beam placement and repeated
+tracking-origin resets. The v5 late-head-rotation shader is unchanged.

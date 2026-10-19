@@ -96,6 +96,7 @@ struct Settings {
     // Native safe-area layout: smaller moves HUD anchors inwards, preserving text size.
     float hud_area = 0.5f;
     bool late_rotation = true;
+    bool menu_pointer = true;
     // Eye reconstruction resolution and ray search quality, independent of scene FOV.
     float eye_render_scale = 0.75f;
     int stereo_steps = 24;
@@ -241,6 +242,13 @@ void set_ui_open(bool open) noexcept;
 // width x height pixels used; 0 x 0 when there is no chat to show) and hands it over each frame.
 bool wants_chat_panel() noexcept;
 void submit_chat_panel(ID3D12Resource* texture, std::uint32_t width, std::uint32_t height) noexcept;
+struct MenuPointer {
+    bool active = false, hovering = false, down = false;
+    float u = 0, v = 0;
+};
+// Read by the overlay on its render thread; inactive outside the VR menu panel.
+MenuPointer menu_pointer() noexcept;
+void cancel_menu_pointer() noexcept;
 // Same for the game's own main or pause menu (client thread).
 void set_game_menu(bool open) noexcept;
 bool game_menu_open() noexcept;

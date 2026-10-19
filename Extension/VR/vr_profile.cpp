@@ -36,6 +36,7 @@ constexpr const char* view_mode = "VR.ViewMode";
 constexpr const char* stick_view_switch = "VR.StickViewSwitch";
 constexpr const char* hud_area = "VR.HudArea";
 constexpr const char* late_rotation = "VR.LateRotation";
+constexpr const char* menu_pointer = "VR.MenuPointer";
 constexpr const char* eye_render_scale = "VR.EyeRenderScale";
 constexpr const char* stereo_steps = "VR.StereoSteps";
 constexpr const char* stereo_mode = "VR.StereoMode";
@@ -111,6 +112,7 @@ const std::array fields{
     Field{.key = key::stick_view_switch, .flag = &Settings::stick_view_switch},
     Field{.key = key::hud_area, .real = &Settings::hud_area},
     Field{.key = key::late_rotation, .flag = &Settings::late_rotation},
+    Field{.key = key::menu_pointer, .flag = &Settings::menu_pointer},
     Field{.key = key::eye_render_scale, .real = &Settings::eye_render_scale},
     Field{.key = key::stereo_steps, .whole = &Settings::stereo_steps},
     Field{.key = key::stereo_mode, .whole = &Settings::stereo_mode},

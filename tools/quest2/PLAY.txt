@@ -1,4 +1,4 @@
-RESKATE VR - QUEST 2 HEAD ROTATION / HUD v5 (EXPERIMENTAL)
+RESKATE VR - QUEST 2 CONTROLS / SQUARE WINDOW v7 (EXPERIMENTAL)
 
 INSTALL
 1. Close skate. and ReSkateLauncher. Back up the files from your current build.
@@ -16,7 +16,28 @@ WHAT CHANGED
   Defaults to 50%, with a 10%-100% slider. This keeps text readable; some widgets may ignore safe areas.
 - Click and release the LEFT stick to switch first/third person (Xbox or Touch).
   Switching is paused in menus and while the headset is unfocused. The switch
-  can be disabled in ADDONS > VR. Both Touch sticks held still recenter.
+  can be disabled in ADDONS > VR.
+- RIGHT stick click recentres the view, including the flat menu panel.
+- Switching first/third person automatically resets the headset origin and
+  follow-camera state, so returning to first person starts centred.
+- Short MENU (hamburger) press opens the normal game menu. Hold about 0.6 s
+  to open ReSkate's menu. The hold no longer sends the filming-mode button.
+- Hold the RIGHT index trigger (the large top trigger) and use the LEFT stick
+  as the D-pad. Release it to move with the stick again. The thumbrest shift
+  still works. This trigger is reserved for D-pad input during gameplay.
+- In menus, point the RIGHT controller at the screen and squeeze its TRIGGER
+  to click or drag. A blue laser/crosshair turns orange while pressed.
+  Release the trigger before the first click after opening a menu.
+  The game window must have desktop focus. Tracking loss releases clicks.
+  ADDONS > VR > Controller menu pointer can turn this feature off.
+  ReSkate's menu now uses the VR pointer as its sole mouse source while active,
+  preventing desktop polling from releasing the trigger during clicks/drags.
+- VR launch locks the game window and resolution list to square sizes and blocks
+  fullscreen/maximize. Standard PLAY retains normal display options.
+- Depth captures are stamped by frame, ignore partial/later effect clears, and
+  must match the kept colour. Resize/recenter/menu transitions discard old pairs.
+  These checks target stale-depth splitting, especially during fast scene motion;
+  physical headset verification is still required.
 - VR eye resolution defaults to 75%, stereo search quality to 24 samples.
   These reduce reconstruction work, with a sharpness / edge-quality tradeoff.
   Raise them to 100% / 48 to restore the previous reconstruction quality.
@@ -37,8 +58,8 @@ If the game cannot reach the headset frame rate, head turns can still stutter.
 For the next test, use 72 Hz in Link, game frame limit Unlimited, V-Sync Off,
 frame generation Off and motion blur Off. Lower game graphics until it holds
 that rate. In the GAME's display menu, select Windowed and 1440 x 1440 as a
-starting point; the game can replace the launcher's requested square resolution
-when it loads saved display settings. Raise resolution once motion is stable.
+starting point. VR launch enforces a square window even after saved settings
+load or the window is resized. Raise resolution once motion is stable.
 
 TEST STATUS
 The release build workflow compiles the Windows DLL and launcher, runs native
